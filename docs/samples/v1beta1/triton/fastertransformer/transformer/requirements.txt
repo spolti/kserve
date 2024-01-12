@@ -1,2 +1,5 @@
 kserve
 transformers
+azure-storage-blob>=12.13.0 # not directly required, pinned by Snyk to avoid a vulnerability
+ray>=2.8.1 # not directly required, pinned by Snyk to avoid a vulnerability
+starlette>=0.27.0 # not directly required, pinned by Snyk to avoid a vulnerability
