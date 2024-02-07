@@ -1,2 +1,4 @@
 kserve
 transformers
+fastapi>=0.109.1 # not directly required, pinned by Snyk to avoid a vulnerability
+numpy>=1.22.2 # not directly required, pinned by Snyk to avoid a vulnerability
