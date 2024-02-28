@@ -50,13 +50,16 @@ class TestDataPlane:
             dataplane._model_registry.update(model)
             yield dataplane
         else:  # request.param == "TEST_RAY_SERVE_MODEL"
-            serve.start(detached=False, http_options={"host": "0.0.0.0", "port": 9071})
-            DummyServeModel.deploy(self.MODEL_NAME)
-            handle = DummyServeModel.get_handle()
+            serve.start(http_options={"host": "0.0.0.0", "port": 9071})
+
+            # https://github.com/ray-project/ray/blob/releases/2.8.0/python/ray/serve/deployment.py#L256
+            app = DummyServeModel.bind(name=self.MODEL_NAME)
+            handle = serve.run(app, name="TestModel", route_prefix="/")
+
             handle.load.remote()
             dataplane._model_registry.update_handle(self.MODEL_NAME, handle)
             yield dataplane
-            serve.shutdown()
+            serve.delete(name="TestModel")
 
     async def test_get_model_from_registry(self):
         dataplane = DataPlane(model_registry=ModelRepository())

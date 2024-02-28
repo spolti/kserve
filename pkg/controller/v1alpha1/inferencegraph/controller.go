@@ -25,7 +25,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	isvcutils "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/utils"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/util/retry"
 
@@ -34,6 +33,8 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	v1beta1api "github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	isvcutils "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/utils"
+	"github.com/kserve/kserve/pkg/utils"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -41,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"knative.dev/pkg/apis"
 	knservingv1 "knative.dev/serving/pkg/apis/serving/v1"
@@ -53,9 +55,10 @@ import (
 // InferenceGraphReconciler reconciles a InferenceGraph object
 type InferenceGraphReconciler struct {
 	client.Client
-	Log      logr.Logger
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	ClientConfig *rest.Config
+	Log          logr.Logger
+	Scheme       *runtime.Scheme
+	Recorder     record.EventRecorder
 }
 
 // InferenceGraphState describes the Readiness of the InferenceGraph
@@ -174,6 +177,19 @@ func (r *InferenceGraphReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.Log.Error(err, "name", graph.GetName())
 		return reconcile.Result{}, err
 	}
+
+	// Abort if Knative Services are not available
+	ksvcAvailable, checkKsvcErr := utils.IsCrdAvailable(r.ClientConfig, knservingv1.SchemeGroupVersion.String(), constants.KnativeServiceKind)
+	if err != nil {
+		return reconcile.Result{}, checkKsvcErr
+	}
+
+	if !ksvcAvailable {
+		r.Recorder.Event(graph, v1.EventTypeWarning, "ServerlessModeRejected",
+			"It is not possible to use Serverless deployment mode when Knative Services are not available")
+		return reconcile.Result{Requeue: false}, nil
+	}
+
 	//@TODO check raw deployment mode
 	desired := createKnativeService(graph.ObjectMeta, graph, routerConfig)
 	err = controllerutil.SetControllerReference(graph, desired, r.Scheme)
@@ -253,15 +269,22 @@ func inferenceGraphReadiness(status v1alpha1api.InferenceGraphStatus) bool {
 }
 
 func (r *InferenceGraphReconciler) SetupWithManager(mgr ctrl.Manager, deployConfig *v1beta1api.DeployConfig) error {
-	if deployConfig.DefaultDeploymentMode == string(constants.RawDeployment) {
-		return ctrl.NewControllerManagedBy(mgr).
-			For(&v1alpha1api.InferenceGraph{}).
-			Owns(&appsv1.Deployment{}).
-			Complete(r)
-	} else {
-		return ctrl.NewControllerManagedBy(mgr).
-			For(&v1alpha1api.InferenceGraph{}).
-			Owns(&knservingv1.Service{}).
-			Complete(r)
+	r.ClientConfig = mgr.GetConfig()
+
+	ksvcFound, err := utils.IsCrdAvailable(r.ClientConfig, knservingv1.SchemeGroupVersion.String(), constants.KnativeServiceKind)
+	if err != nil {
+		return err
 	}
+
+	ctrlBuilder := ctrl.NewControllerManagedBy(mgr).
+		For(&v1alpha1api.InferenceGraph{}).
+		Owns(&appsv1.Deployment{})
+
+	if ksvcFound {
+		ctrlBuilder = ctrlBuilder.Owns(&knservingv1.Service{})
+	} else {
+		r.Log.Info("The InferenceGraph controller won't watch serving.knative.dev/v1/Service resources because the CRD is not available.")
+	}
+
+	return ctrlBuilder.Complete(r)
 }
