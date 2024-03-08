@@ -27,6 +27,7 @@ import (
 	trainedmodelcontroller "github.com/kserve/kserve/pkg/controller/v1alpha1/trainedmodel"
 	"github.com/kserve/kserve/pkg/controller/v1alpha1/trainedmodel/reconcilers/modelconfig"
 	v1beta1controller "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice"
+	"github.com/kserve/kserve/pkg/utils"
 	"github.com/kserve/kserve/pkg/webhook/admission/pod"
 	"github.com/kserve/kserve/pkg/webhook/admission/servingruntime"
 	istio_networking "istio.io/api/networking/v1alpha3"
@@ -131,7 +132,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	client, err := client.New(cfg, client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
 		log.Error(err, "unable to create new client.")
 	}
@@ -146,13 +147,27 @@ func main() {
 		log.Error(err, "unable to get ingress config.")
 		os.Exit(1)
 	}
-	if deployConfig.DefaultDeploymentMode == string(constants.Serverless) {
+
+	ksvcFound, ksvcCheckErr := utils.IsCrdAvailable(cfg, knservingv1.SchemeGroupVersion.String(), constants.KnativeServiceKind)
+	if ksvcCheckErr != nil {
+		log.Error(ksvcCheckErr, "error when checking if Knative Service kind is available")
+		os.Exit(1)
+	}
+	if ksvcFound {
 		log.Info("Setting up Knative scheme")
 		if err := knservingv1.AddToScheme(mgr.GetScheme()); err != nil {
 			log.Error(err, "unable to add Knative APIs to scheme")
 			os.Exit(1)
 		}
-		if ingressConfig.DisableIstioVirtualHost == false {
+	}
+
+	if !ingressConfig.DisableIstioVirtualHost {
+		vsFound, vsCheckErr := utils.IsCrdAvailable(cfg, v1alpha3.SchemeGroupVersion.String(), constants.IstioVirtualServiceKind)
+		if vsCheckErr != nil {
+			log.Error(vsCheckErr, "error when checking if Istio VirtualServices are available")
+			os.Exit(1)
+		}
+		if vsFound {
 			log.Info("Setting up Istio schemes")
 			if err := v1alpha3.AddToScheme(mgr.GetScheme()); err != nil {
 				log.Error(err, "unable to add Istio v1alpha3 APIs to scheme")
