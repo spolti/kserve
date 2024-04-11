@@ -131,6 +131,8 @@ require (
 )
 
 replace (
+	// Fixes CVE-2020-28466, CVE-2020-26521, CVE-2022-42709
+	github.com/nats-io/nats-server/v2 => github.com/nats-io/nats-server/v2 v2.9.23
 	// Fixes CVE-2022-21698 and CVE-2023-45142
 	// this dependency comes from k8s.io/component-base@v0.28.4 and k8s.io/apiextensions-apiserver@v0.28.4
 	// before removing it make sure that the next version of the related k8s dependencies contains the fix
