@@ -25,9 +25,9 @@ jobs:
           echo "from rhoai-2.8"
           echo ${{ github.event.sender.id }}
           echo ${{ github.event.sender.login }}
-          echo ${{ github.event.pull_request.title }}
+          echo "${{ github.event.pull_request.title }}"
       - name: instant-merge
-        if: ${{ github.event.sender.login == 'red-hat-konflux[bot]' && startsWith(github.event.pull_request.title, 'Update kserve-') }}
+        if: ${{ github.event.sender.login == 'red-hat-konflux[bot]' && ( startsWith(github.event.pull_request.title, 'Update kserve-') || contains(github.event.pull_request.title, 'update kserve-') ) }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
