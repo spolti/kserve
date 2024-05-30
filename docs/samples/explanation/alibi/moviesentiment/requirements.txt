@@ -2,3 +2,5 @@ alibi==0.6.0
 scikit-learn == 0.20.3
 dill>=0.3.0
 plotly>=4.2.1
+numpy>=1.22.2 # not directly required, pinned by Snyk to avoid a vulnerability
+scipy>=1.10.0rc1 # not directly required, pinned by Snyk to avoid a vulnerability
