@@ -21,7 +21,7 @@ RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Addressing vulnerability scans by upgrading pip/setuptools
-RUN python3 -m pip install --upgrade pip setuptools
+RUN python3 -m pip install --upgrade pip setuptools==69.5.1
 
 COPY kserve/pyproject.toml kserve/poetry.lock kserve/
 RUN cd kserve && poetry install --no-root --no-interaction --no-cache --extras "storage"
@@ -50,7 +50,7 @@ ARG VENV_PATH
 ENV VIRTUAL_ENV=${VENV_PATH}
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-RUN microdnf install python39 shadow-utils
+RUN microdnf install python39 shadow-utils && microdnf clean all
 RUN adduser kserve -m -u 1000 -d /home/kserve
 
 COPY --from=builder --chown=kserve:kserve $VIRTUAL_ENV $VIRTUAL_ENV
