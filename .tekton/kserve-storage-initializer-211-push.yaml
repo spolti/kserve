@@ -18,11 +18,13 @@ metadata:
 spec:
   params:
   - name: dockerfile
-    value: python/storage-initializer.Dockerfile
+    value: storage-initializer.Dockerfile
   - name: git-url
     value: '{{source_url}}'
   - name: output-image
     value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-storage-initializer/kserve-storage-initializer-211:{{revision}}
+  - name: path-context
+    value: python
   - name: revision
     value: '{{revision}}'
   pipelineSpec:
