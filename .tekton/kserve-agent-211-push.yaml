@@ -6,8 +6,11 @@ metadata:
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "rhoai-2.11"
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "push" 
+      && target_branch == "rhoai-2.11" 
+      && ( !".tekton/**".pathChanged() || ".tekton/kserve-agent-211-push.yaml".pathChanged() ) 
+      && !"config/overlays/odh/params.env".pathChanged()
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: kserve-agent
@@ -22,7 +25,7 @@ spec:
   - name: git-url
     value: '{{source_url}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-agent/kserve-agent-211:{{revision}}
+    value: quay.io/modh/kserve-agent:{{target_branch}}
   - name: revision
     value: '{{revision}}'
   pipelineSpec:
@@ -408,6 +411,9 @@ spec:
       params:
       - name: IMAGE
         value: $(tasks.build-container.results.IMAGE_URL)
+      - name: ADDITIONAL_TAGS
+        value: 
+          - '{{target_branch}}-{{revision}}'
       runAfter:
       - build-container
       taskRef:
