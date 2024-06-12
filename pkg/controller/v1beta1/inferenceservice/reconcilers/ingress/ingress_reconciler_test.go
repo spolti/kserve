@@ -41,6 +41,7 @@ func TestCreateVirtualService(t *testing.T) {
 	annotations := map[string]string{"test": "test"}
 	isvcAnnotations := map[string]string{"test": "test", "kubectl.kubernetes.io/last-applied-configuration": "test"}
 	labels := map[string]string{"test": "test"}
+	knativeLocalGatewayService := "someIngressServiceName"
 	domain := "example.com"
 	serviceHostName := constants.InferenceServiceHostName(serviceName, namespace, domain)
 	serviceInternalHostName := network.GetServiceHostname(serviceName, namespace)
@@ -79,10 +80,10 @@ func TestCreateVirtualService(t *testing.T) {
 	}, {
 		name: "predictor missing url",
 		ingressConfig: &v1beta1.IngressConfig{
-			IngressGateway:          constants.KnativeIngressGateway,
-			IngressServiceName:      "someIngressServiceName",
-			LocalGateway:            constants.KnativeLocalGateway,
-			LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+			IngressGateway:             constants.KnativeIngressGateway,
+			KnativeLocalGatewayService: knativeLocalGatewayService,
+			LocalGateway:               constants.KnativeLocalGateway,
+			LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 		},
 		useDefault: false,
 		componentStatus: &v1beta1.InferenceServiceStatus{
@@ -94,10 +95,10 @@ func TestCreateVirtualService(t *testing.T) {
 	}, {
 		name: "found predictor status",
 		ingressConfig: &v1beta1.IngressConfig{
-			IngressGateway:          constants.KnativeIngressGateway,
-			IngressServiceName:      "someIngressServiceName",
-			LocalGateway:            constants.KnativeLocalGateway,
-			LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+			IngressGateway:             constants.KnativeIngressGateway,
+			KnativeLocalGatewayService: knativeLocalGatewayService,
+			LocalGateway:               constants.KnativeLocalGateway,
+			LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 		},
 		useDefault: false,
 		componentStatus: &v1beta1.InferenceServiceStatus{
@@ -134,7 +135,7 @@ func TestCreateVirtualService(t *testing.T) {
 						Match: predictorRouteMatch,
 						Route: []*istiov1beta1.HTTPRouteDestination{
 							{
-								Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+								Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 								Weight:      100,
 							},
 						},
@@ -149,10 +150,10 @@ func TestCreateVirtualService(t *testing.T) {
 	}, {
 		name: "local cluster predictor",
 		ingressConfig: &v1beta1.IngressConfig{
-			IngressGateway:          constants.KnativeIngressGateway,
-			IngressServiceName:      "someIngressServiceName",
-			LocalGateway:            constants.KnativeLocalGateway,
-			LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+			IngressGateway:             constants.KnativeIngressGateway,
+			KnativeLocalGatewayService: knativeLocalGatewayService,
+			LocalGateway:               constants.KnativeLocalGateway,
+			LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 		},
 		useDefault: false,
 		componentStatus: &v1beta1.InferenceServiceStatus{
@@ -198,7 +199,7 @@ func TestCreateVirtualService(t *testing.T) {
 						},
 						Route: []*istiov1beta1.HTTPRouteDestination{
 							{
-								Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+								Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 								Weight:      100,
 							},
 						},
@@ -214,10 +215,10 @@ func TestCreateVirtualService(t *testing.T) {
 		{
 			name: "nil transformer status fails with status unknown",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -241,10 +242,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "found transformer and predictor status",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -297,7 +298,7 @@ func TestCreateVirtualService(t *testing.T) {
 							Match: predictorRouteMatch,
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -313,10 +314,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "found transformer and predictor status",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -369,7 +370,7 @@ func TestCreateVirtualService(t *testing.T) {
 							Match: predictorRouteMatch,
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -385,10 +386,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "nil explainer status fails with status unknown",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -412,10 +413,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "found explainer and predictor status",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -495,7 +496,7 @@ func TestCreateVirtualService(t *testing.T) {
 							},
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -509,7 +510,7 @@ func TestCreateVirtualService(t *testing.T) {
 							Match: predictorRouteMatch,
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -525,14 +526,14 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "found predictor status with path template",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
-				UrlScheme:               "http",
-				IngressDomain:           "my-domain.com",
-				PathTemplate:            "/serving/{{ .Namespace }}/{{ .Name }}",
-				DisableIstioVirtualHost: false,
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
+				UrlScheme:                  "http",
+				IngressDomain:              "my-domain.com",
+				PathTemplate:               "/serving/{{ .Namespace }}/{{ .Name }}",
+				DisableIstioVirtualHost:    false,
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -586,7 +587,7 @@ func TestCreateVirtualService(t *testing.T) {
 							},
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -628,7 +629,7 @@ func TestCreateVirtualService(t *testing.T) {
 								Uri: "/",
 							},
 							Route: []*istiov1beta1.HTTPRouteDestination{
-								createHTTPRouteDestination("knative-local-gateway.istio-system.svc.cluster.local"),
+								createHTTPRouteDestination(knativeLocalGatewayService),
 							},
 							Headers: &istiov1beta1.Headers{
 								Request: &istiov1beta1.Headers_HeaderOperations{
@@ -644,10 +645,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "found predictor status with default suffix",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: true,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -684,7 +685,7 @@ func TestCreateVirtualService(t *testing.T) {
 							Match: predictorRouteMatch,
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -699,10 +700,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "found transformer and predictor status with default suffix",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: true,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -755,7 +756,7 @@ func TestCreateVirtualService(t *testing.T) {
 							Match: predictorRouteMatch,
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
@@ -771,10 +772,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "transformer is not ready",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: true,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -821,10 +822,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "nil explainer status fails with status unknown",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -848,10 +849,10 @@ func TestCreateVirtualService(t *testing.T) {
 		}, {
 			name: "explainer is not ready",
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -911,10 +912,10 @@ func TestCreateVirtualService(t *testing.T) {
 				},
 			},
 			ingressConfig: &v1beta1.IngressConfig{
-				IngressGateway:          constants.KnativeIngressGateway,
-				IngressServiceName:      "someIngressServiceName",
-				LocalGateway:            constants.KnativeLocalGateway,
-				LocalGatewayServiceName: "knative-local-gateway.istio-system.svc.cluster.local",
+				IngressGateway:             constants.KnativeIngressGateway,
+				KnativeLocalGatewayService: knativeLocalGatewayService,
+				LocalGateway:               constants.KnativeLocalGateway,
+				LocalGatewayServiceName:    "knative-local-gateway.istio-system.svc.cluster.local",
 			},
 			useDefault: false,
 			componentStatus: &v1beta1.InferenceServiceStatus{
@@ -962,7 +963,7 @@ func TestCreateVirtualService(t *testing.T) {
 							},
 							Route: []*istiov1beta1.HTTPRouteDestination{
 								{
-									Destination: &istiov1beta1.Destination{Host: constants.LocalGatewayHost, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
+									Destination: &istiov1beta1.Destination{Host: knativeLocalGatewayService, Port: &istiov1beta1.PortSelector{Number: constants.CommonDefaultHttpPort}},
 									Weight:      100,
 								},
 							},
