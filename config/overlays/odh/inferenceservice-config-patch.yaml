@@ -12,19 +12,24 @@ data:
         "memoryLimit": "1Gi",
         "cpuRequest": "100m",
         "cpuLimit": "1",
-        "enableDirectPvcVolumeMount": true
+        "caBundleConfigMapName": "",
+        "caBundleVolumeMountPath": "/etc/ssl/custom-certs",
+        "enableDirectPvcVolumeMount": true,
+        "enableModelcar": false,
+        "cpuModelcar": "10m",
+        "memoryModelcar": "15Mi"
     }
   ingress: |-
     {
         "ingressGateway" : "knative-serving/knative-ingress-gateway",
-        "ingressService" : "istio-ingressgateway.istio-system.svc.cluster.local",
-        "localGateway" : "knative-serving/knative-local-gateway",
-        "localGatewayService" : "knative-local-gateway.istio-system.svc.cluster.local",
+        "knativeLocalGatewayService" : "knative-local-gateway.istio-system.svc.cluster.local",
+        "localGateway" : "istio-system/kserve-local-gateway",
+        "localGatewayService" : "kserve-local-gateway.istio-system.svc.cluster.local",
         "ingressDomain"  : "example.com",
         "ingressClassName" : "istio",
         "domainTemplate": "{{ .Name }}-{{ .Namespace }}.{{ .IngressDomain }}",
         "urlScheme": "https",
-        "disableIstioVirtualHost": false, 
+        "disableIstioVirtualHost": false,
         "disableIngressCreation": true
     }
   logger: |-
@@ -42,7 +47,9 @@ data:
         "memoryRequest": "1Gi",
         "memoryLimit": "1Gi",
         "cpuRequest": "1",
-        "cpuLimit": "1"
+        "cpuLimit": "1",
+        "maxBatchSize": "32",
+        "maxLatency": "5000"
     }
   agent: |-
     {
@@ -59,13 +66,4 @@ data:
         "memoryLimit": "1Gi",
         "cpuRequest": "100m",
         "cpuLimit": "1"
-    }
-  deploy: |-
-    {
-      "defaultDeploymentMode": "Serverless"
-    }
-  metricsAggregator: |-
-    {
-      "enableMetricAggregation": "false",
-      "enablePrometheusScraping" : "false"
     }
