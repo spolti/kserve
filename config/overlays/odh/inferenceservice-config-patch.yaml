@@ -23,6 +23,7 @@ data:
     {
         "ingressGateway" : "knative-serving/knative-ingress-gateway",
         "knativeLocalGatewayService" : "knative-local-gateway.istio-system.svc.cluster.local",
+        "ingressService" : "need.to.delete",
         "localGateway" : "istio-system/kserve-local-gateway",
         "localGatewayService" : "kserve-local-gateway.istio-system.svc.cluster.local",
         "ingressDomain"  : "example.com",
