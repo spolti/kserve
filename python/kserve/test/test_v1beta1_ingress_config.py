@@ -50,8 +50,7 @@ class TestV1beta1IngressConfig(unittest.TestCase):
         # model = kserve.models.v1beta1_ingress_config.V1beta1IngressConfig()  # noqa: E501
         if include_optional :
             return V1beta1IngressConfig(
-                ingress_gateway = '0', 
-                ingress_service = '0'
+                ingress_gateway = '0'
             )
         else :
             return V1beta1IngressConfig(

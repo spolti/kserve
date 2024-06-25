@@ -254,7 +254,7 @@ func createHTTPMatchRequest(prefix, targetHost, internalHost string, isInternal 
 					Regex: constants.HostRegExp(internalHost),
 				},
 			},
-			Gateways: []string{config.LocalGateway},
+			Gateways: []string{config.LocalGateway, constants.IstioMeshGateway},
 		},
 	}
 	if !isInternal {
@@ -341,7 +341,7 @@ func createIngress(isvc *v1beta1.InferenceService, useDefault bool, config *v1be
 			Match: createHTTPMatchRequest(constants.ExplainPrefix(), serviceHost,
 				network.GetServiceHostname(isvc.Name, isvc.Namespace), isInternal, config),
 			Route: []*istiov1beta1.HTTPRouteDestination{
-				createHTTPRouteDestination(config.LocalGatewayServiceName),
+				createHTTPRouteDestination(config.KnativeLocalGatewayService),
 			},
 			Headers: &istiov1beta1.Headers{
 				Request: &istiov1beta1.Headers_HeaderOperations{
@@ -358,7 +358,7 @@ func createIngress(isvc *v1beta1.InferenceService, useDefault bool, config *v1be
 		Match: createHTTPMatchRequest("", serviceHost,
 			network.GetServiceHostname(isvc.Name, isvc.Namespace), isInternal, config),
 		Route: []*istiov1beta1.HTTPRouteDestination{
-			createHTTPRouteDestination(config.LocalGatewayServiceName),
+			createHTTPRouteDestination(config.KnativeLocalGatewayService),
 		},
 		Headers: &istiov1beta1.Headers{
 			Request: &istiov1beta1.Headers_HeaderOperations{
@@ -373,6 +373,7 @@ func createIngress(isvc *v1beta1.InferenceService, useDefault bool, config *v1be
 	}
 	gateways := []string{
 		config.LocalGateway,
+		constants.IstioMeshGateway,
 	}
 	if !isInternal {
 		hosts = append(hosts, serviceHost)
@@ -421,7 +422,7 @@ func createIngress(isvc *v1beta1.InferenceService, useDefault bool, config *v1be
 				Uri: "/",
 			},
 			Route: []*istiov1beta1.HTTPRouteDestination{
-				createHTTPRouteDestination(config.LocalGatewayServiceName),
+				createHTTPRouteDestination(config.KnativeLocalGatewayService),
 			},
 			Headers: &istiov1beta1.Headers{
 				Request: &istiov1beta1.Headers_HeaderOperations{

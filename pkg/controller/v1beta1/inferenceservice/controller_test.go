@@ -76,7 +76,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			}`,
 			"ingress": `{
 				"ingressGateway": "knative-serving/knative-ingress-gateway",
-				"ingressService": "test-destination",
 				"localGateway": "knative-serving/knative-local-gateway",
 				"localGatewayService": "knative-local-gateway.istio-system.svc.cluster.local"
 			}`,
@@ -316,6 +315,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Spec: istiov1beta1.VirtualService{
 					Gateways: []string{
 						constants.KnativeLocalGateway,
+						constants.IstioMeshGateway,
 						constants.KnativeIngressGateway,
 					},
 					Hosts: []string{
@@ -326,7 +326,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 						{
 							Match: []*istiov1beta1.HTTPMatchRequest{
 								{
-									Gateways: []string{constants.KnativeLocalGateway},
+									Gateways: []string{constants.KnativeLocalGateway, constants.IstioMeshGateway},
 									Authority: &istiov1beta1.StringMatch{
 										MatchType: &istiov1beta1.StringMatch_Regex{
 											Regex: constants.HostRegExp(network.GetServiceHostname(serviceKey.Name, serviceKey.Namespace)),
@@ -2078,7 +2078,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 					copiedConfigs[key] = `{
 						"disableIstioVirtualHost": true,
 						"ingressGateway": "knative-serving/knative-ingress-gateway",
-						"ingressService": "test-destination",
 						"localGateway": "knative-serving/knative-local-gateway",
 						"localGatewayService": "knative-local-gateway.istio-system.svc.cluster.local"
 					}`
