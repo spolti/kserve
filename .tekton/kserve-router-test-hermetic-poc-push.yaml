@@ -25,10 +25,6 @@ spec:
     value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-router/kserve-router-test-hermetic-poc:{{revision}}
   - name: dockerfile
     value: router.Dockerfile
-  - name: prefetch-input
-    value: '{"type": "gomod", "path": "."}'
-  - name: hermetic
-    value: "true"
   pipelineSpec:
     finally:
     - name: show-sbom
@@ -95,7 +91,7 @@ spec:
       description: Skip checks against built image
       name: skip-checks
       type: string
-    - default: "false"
+    - default: "true"
       description: Execute the build with network isolation
       name: hermetic
       type: string
@@ -103,6 +99,7 @@ spec:
       description: Build dependencies to be prefetched by Cachi2
       name: prefetch-input
       type: string
+      value: '{"type": "gomod", "path": "."}'
     - default: "false"
       description: Java build
       name: java

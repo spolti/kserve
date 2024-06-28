@@ -94,7 +94,7 @@ spec:
       description: Skip checks against built image
       name: skip-checks
       type: string
-    - default: "false"
+    - default: "true"
       description: Execute the build with network isolation
       name: hermetic
       type: string
@@ -102,6 +102,7 @@ spec:
       description: Build dependencies to be prefetched by Cachi2
       name: prefetch-input
       type: string
+      values: '{"type": "gomod", "path": "."}'
     - default: "false"
       description: Java build
       name: java
