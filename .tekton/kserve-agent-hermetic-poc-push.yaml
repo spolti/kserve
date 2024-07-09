@@ -25,6 +25,8 @@ spec:
     value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-agent/kserve-agent-hermetic-poc:{{revision}}
   - name: dockerfile
     value: agent.Dockerfile
+  - name: prefetch-input
+    value: '{"type": "gomod", "path": "."}' 
   pipelineSpec:
     finally:
     - name: show-sbom
