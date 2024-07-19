@@ -25,6 +25,8 @@ spec:
     value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-router/kserve-router-test-hermetic-poc:{{revision}}
   - name: dockerfile
     value: router.Dockerfile
+  - name: prefetch-input
+    value: '{"type": "gomod", "path": "."}'
   pipelineSpec:
     finally:
     - name: show-sbom
