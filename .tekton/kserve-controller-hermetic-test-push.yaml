@@ -25,6 +25,8 @@ spec:
     value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-controller/kserve-controller-hermetic-test:{{revision}}
   - name: dockerfile
     value: Dockerfile
+  - name: prefetch-input
+    value: '{"type": "gomod", "path": "."}'
   pipelineSpec:
     finally:
     - name: show-sbom
