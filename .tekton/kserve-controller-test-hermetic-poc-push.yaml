@@ -6,8 +6,10 @@ metadata:
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "test-hermetic-poc"
+    pipelinesascode.tekton.dev/on-cel-expression: 
+      event == "push" 
+      && target_branch == "test-hermetic-poc"
+      && ( !".tekton/**".pathChanged() || ".tekton/kserve-controller-test-hermetic-poc-push.yaml".pathChanged() ) 
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: kserve-controller
@@ -25,6 +27,8 @@ spec:
     value: quay.io/redhat-user-workloads/rhoai-tenant/kserve-controller/kserve-controller-test-hermetic-poc:{{revision}}
   - name: dockerfile
     value: Dockerfile
+  - name: prefetch-input
+    value: '{"type": "gomod", "path": "."}'
   pipelineSpec:
     finally:
     - name: show-sbom
@@ -91,7 +95,7 @@ spec:
       description: Skip checks against built image
       name: skip-checks
       type: string
-    - default: "false"
+    - default: "true"
       description: Execute the build with network isolation
       name: hermetic
       type: string
