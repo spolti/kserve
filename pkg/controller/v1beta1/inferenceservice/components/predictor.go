@@ -19,6 +19,7 @@ package components
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
@@ -216,6 +217,28 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 		// Update image tag if GPU is enabled or runtime version is provided
 		isvcutils.UpdateImageTag(container, isvc.Spec.Predictor.Model.RuntimeVersion, isvc.Spec.Predictor.Model.Runtime)
 
+		// Update volume mount's readonly annotation based on the ISVC annotation
+		readonly := true
+		isvcReadonlyString, ok := isvc.Annotations[constants.StorageReadonly]
+
+		if ok {
+			// Parse the annotation string as a bool
+			isvcReadonlyBool, err := strconv.ParseBool(isvcReadonlyString)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// If StorageReadonly is set to false, the readOnly field in the volume mount's annotation is also set to false
+			// Otherwise, if it is true or unset, use the default behavior
+			if !isvcReadonlyBool {
+				readonly = false
+			}
+		}
+
+		for vm_idx, _ := range container.VolumeMounts {
+			container.VolumeMounts[vm_idx].ReadOnly = readonly
+		}
+
 		podSpec = *mergedPodSpec
 		podSpec.Containers = []v1.Container{
 			*container,
@@ -351,15 +374,6 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 	predictorPods, err := isvcutils.ListPodsByLabel(p.client, isvc.ObjectMeta.Namespace, podLabelKey, podLabelValue)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "fails to list inferenceservice pods by label")
-	}
-
-	// Update pod's readonly status based on the ISVC annotation
-	for _, pod := range predictorPods.Items {
-		if pod.Annotations == nil {
-			pod.Annotations = make(map[string]string)
-		}
-		isvcReadonlyString := isvc.Annotations[constants.StorageReadonly]
-		pod.Annotations[constants.StorageReadonly] = isvcReadonlyString
 	}
 
 	isvc.Status.PropagateModelStatus(statusSpec, predictorPods, rawDeployment)

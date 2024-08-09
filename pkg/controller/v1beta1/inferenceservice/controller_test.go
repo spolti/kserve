@@ -1708,15 +1708,16 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			defer k8sClient.Delete(ctx, configMap)
 
 			// Define InferenceService
-			serviceName := "readonly-unset-isvc"
+			serviceName := "readonly-true-isvc"
 			serviceNamespace := "default"
 			var storageUri = "s3://test/mnist/export"
 			servingRuntime := createServingRuntime(serviceNamespace, "tf-serving")
 			defer k8sClient.Delete(ctx, servingRuntime)
 			isvc := createInferenceService(serviceNamespace, serviceName, storageUri)
-			//modify base isvc here as needed per testcase
+
+			// Modify base isvc here as needed per testcase
 			isvc.ObjectMeta.Annotations = map[string]string{}
-			isvc.Annotations[constants.StorageReadonly] = "true"
+			isvc.ObjectMeta.Annotations[constants.StorageReadonly] = "true"
 			Expect(k8sClient.Create(context.TODO(), isvc)).NotTo(gomega.HaveOccurred())
 			defer k8sClient.Delete(ctx, isvc)
 
@@ -1728,10 +1729,13 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Should(Succeed())
 
 			// Check the readonly values
-			isvcAnnotations := actualService.Annotations
+			isvcAnnotations := actualService.ObjectMeta.Annotations
+			isvcReadonly, ok := isvcAnnotations[constants.StorageReadonly]
+			Expect(ok).To(Equal(true))
+
 			volumeMnt := actualService.Spec.Template.Spec.Containers[0].VolumeMounts[0]
 
-			Expect(isvcAnnotations[constants.StorageReadonly]).To(Equal("true"))
+			Expect(isvcReadonly).To(Equal("true"))
 			Expect(volumeMnt.ReadOnly).To(Equal(true))
 		})
 	})
