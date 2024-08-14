@@ -235,9 +235,12 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 			}
 		}
 
-		for vm_idx, _ := range container.VolumeMounts {
-			container.VolumeMounts[vm_idx].ReadOnly = readonly
-		}
+		fmt.Printf("READONLY VALUE HERE: %v\n", readonly)
+		fmt.Printf("%v", container)
+
+		container.VolumeMounts = [] 
+		container.VolumeMounts[0].ReadOnly = readonly
+		//}
 
 		podSpec = *mergedPodSpec
 		podSpec.Containers = []v1.Container{
