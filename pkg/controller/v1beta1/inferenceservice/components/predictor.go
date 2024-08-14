@@ -220,7 +220,7 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 		// Update volume mount's readonly annotation based on the ISVC annotation
 		readonly := true
 		isvcReadonlyString, ok := isvc.Annotations[constants.StorageReadonly]
-
+		fmt.Printf("\nISVC ANN: %v\n", isvcReadonlyString)
 		if ok {
 			// Parse the annotation string as a bool
 			isvcReadonlyBool, err := strconv.ParseBool(isvcReadonlyString)
@@ -238,8 +238,10 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 		fmt.Printf("READONLY VALUE HERE: %v\n", readonly)
 		fmt.Printf("%v", container)
 
-		container.VolumeMounts = [] 
-		container.VolumeMounts[0].ReadOnly = readonly
+		//container.VolumeMounts = []v1.VolumeMount{
+		//	{Name: "predictor-volume"},
+		//}
+		//container.VolumeMounts[0].ReadOnly = readonly
 		//}
 
 		podSpec = *mergedPodSpec

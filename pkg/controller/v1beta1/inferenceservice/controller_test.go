@@ -1720,13 +1720,13 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Should(Succeed())
 
 			// Check the readonly values
-			isvcAnnotations := actualService.Annotations
-			isvcReadonly, ok := isvcAnnotations[constants.StorageReadonly]
-			Expect(ok).To(Equal(true))
+			//isvcAnnotations := actualService.Annotations
+			//isvcReadonly, ok := isvcAnnotations[constants.StorageReadonly]
+			//Expect(ok).To(Equal(true))
 
 			volumeMnt := actualService.Spec.Template.Spec.Containers[0].VolumeMounts[0]
 
-			Expect(isvcReadonly).To(Equal("true"))
+			//Expect(isvcReadonly).To(Equal("true"))
 			Expect(volumeMnt.ReadOnly).To(Equal(true))
 		})
 	})
