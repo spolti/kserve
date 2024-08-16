@@ -1,0 +1,54 @@
+[tool.poetry]
+name = "storage"
+version = "0.14.0rc1"
+description = "A storage initializer for KServe"
+authors = ["KServe authors"]
+license = "https://github.com/kserve/kserve/blob/master/LICENSE"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+packages = [
+    { include = "storage" },
+]
+
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.12"
+requests = { version = "^2.20.0", optional = true }
+google-cloud-storage = { version = "^2.3.0", optional = true }
+azure-storage-blob = { version = "^12.10.0", optional = true }
+azure-storage-file-share = { version = "^12.7.0", optional = true }
+azure-identity = { version = "^1.8.0", optional = true }
+boto3 = { version = "^1.21.0", optional = true }
+
+# Logging dependencies. They can be opted into by apps.
+asgi-logger = { version = "^0.1.0", optional = true, python = ">3.8.0,<3.12" }
+pyyaml = { version = "^6.0.0", optional = true, python = ">3.8.0,<3.12" }
+
+[tool.poetry.extras]
+storage = [
+    "requests",
+    "google-cloud-storage",
+    "azure-storage-blob",
+    "azure-storage-file-share",
+    "azure-identity",
+    "boto3",
+]
+logging = [
+    "asgi-logger",
+    "pyyaml",
+]
+
+
+[tool.poetry-version-plugin]
+source = "file"
+file_path = "../VERSION"
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
