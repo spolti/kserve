@@ -7,9 +7,10 @@ metadata:
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "test-hermetic-poc" && ( "./python/***".pathChanged() || ".tekton/kserve-storage-initializer-test-hermetic-poc-pull-request.yaml".pathChanged()
-      || "storage-initializer.Dockerfile".pathChanged() )
+    pipelinesascode.tekton.dev/on-cel-expression: 
+      event == "pull_request" 
+      && target_branch == "test-hermetic-poc" 
+      && ( "python/**".pathChanged() || ".tekton/kserve-storage-initializer-test-hermetic-poc-pull-request.yaml".pathChanged() ) 
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: kserve-storage-initializer
@@ -31,6 +32,8 @@ spec:
     value: storage-initializer.Dockerfile
   - name: path-context
     value: python
+  - name: prefetch-input
+    value: '{"type": "pip", "path": "."}'
   pipelineSpec:
     finally:
     - name: show-sbom
@@ -97,7 +100,7 @@ spec:
       description: Skip checks against built image
       name: skip-checks
       type: string
-    - default: "false"
+    - default: "true"
       description: Execute the build with network isolation
       name: hermetic
       type: string
