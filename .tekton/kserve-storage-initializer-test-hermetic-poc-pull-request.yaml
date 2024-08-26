@@ -35,7 +35,11 @@ spec:
   - name: hermetic
     value: "true"
   - name: prefetch-input
-    value: '{"type": "rpm", "path": "python"}'
+    value: |
+    [
+      {"type": "pip", "path": "python/kserve", "requirements_files": ["requirements.txt"]},
+      {"type": "rpm", "path": "python"}
+    ]
   pipelineSpec:
     finally:
     - name: show-sbom
