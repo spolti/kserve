@@ -33,7 +33,8 @@ spec:
   - name: hermetic
     value: "true"
   - name: prefetch-input
-    value: rpm
+    value: |
+    {"type": "rpm", "path": "python"}
   pipelineSpec:
     finally:
     - name: show-sbom
