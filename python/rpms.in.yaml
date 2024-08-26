@@ -1,0 +1,11 @@
+contentOrigin:
+  repofiles:
+    - ubi.repo
+packages:
+  - python39
+  - python39-devel
+  - gcc
+  - libffi-devel
+  - openssl-devel
+  - krb5-workstation
+  - krb5-libs
