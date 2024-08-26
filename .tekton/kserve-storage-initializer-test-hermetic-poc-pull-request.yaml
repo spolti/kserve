@@ -32,8 +32,10 @@ spec:
     value: storage-initializer.Dockerfile
   - name: path-context
     value: python
+  - name: hermetic
+    value: "true"
   - name: prefetch-input
-    value: '{"type": "pip", "path": "."}'
+    value: rpm
   pipelineSpec:
     finally:
     - name: show-sbom
@@ -193,6 +195,8 @@ spec:
       params:
       - name: input
         value: $(params.prefetch-input)
+      - name: dev-package-managers
+        value: "true"
       runAfter:
       - clone-repository
       taskRef:
