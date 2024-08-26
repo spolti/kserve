@@ -30,6 +30,8 @@ spec:
     value: 5d
   - name: dockerfile
     value: agent.Dockerfile
+  - name: hermetic
+    value: "true"
   - name: prefetch-input
     value: '{"type": "gomod", "path": "."}'
   pipelineSpec:
