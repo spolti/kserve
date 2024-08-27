@@ -6,6 +6,9 @@ on:
       tag_name:
         description: 'Tag name for the new release'
         required: true
+      prev_tag_name:
+        description: 'Previous Tag name for change log'
+        required: true
 
 permissions:
   contents: write
@@ -72,7 +75,7 @@ jobs:
           git config --global user.email "github-actions@github.com"
           git config --global user.name "GitHub Actions"
           git add config/overlays/odh/params.env
-          git commit -m "Update image refs for odh release."
+          git commit -m "Update image refs for odh release." || true #hack to not fail when there is nothing to commit
 
       - name: Create Tag
         id: create_tag
@@ -84,11 +87,18 @@ jobs:
     name: Changelog
     needs: [fetch-tag,update-params-env]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
+
+      - name: Generate Changelog
+        run: |
+          gh pr list --state merged --base ${{ github.event.inputs.prev_tag_name }} --head ${{ github.event.inputs.tag_name }} --json title,author,number | \
+          jq -r '.[] | "* \(.title) by @\(.author.login) in #\(.number)"' > CHANGELOG.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -99,5 +109,6 @@ jobs:
           draft: false
     #this takes the path of payload to upload as an asset in the changelog
           files: bin/*
-          generate_release_notes: true
+          generate_release_notes: false
           name: ${{ github.event.inputs.tag_name }}
+          body_path: CHANGELOG.md
