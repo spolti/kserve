@@ -9,3 +9,5 @@ packages:
   - openssl-devel
   - krb5-workstation
   - krb5-libs
+  - shadow-utils
+
