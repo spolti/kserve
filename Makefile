@@ -196,7 +196,7 @@ bump-version:
 
 # Build the docker image
 docker-build: test
-	docker buildx build . -t ${IMG}
+	podman buildx build --arch x86_64 . -t ${IMG}
 	@echo "updating kustomize image patch file for manager resource"
 
 	# Use perl instead of sed to avoid OSX/Linux compatibility issue:

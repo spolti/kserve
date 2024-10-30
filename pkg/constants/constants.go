@@ -54,6 +54,11 @@ const (
 	InferenceGraphLabel          = "serving.kserve.io/inferencegraph"
 )
 
+// Authorino related constants
+const (
+	ODHAuthorinoLabel = "security.opendatahub.io/enable-auth"
+)
+
 // TrainedModel Constants
 var (
 	TrainedModelAllocated = KServeAPIGroupName + "/" + "trainedmodel-allocated"
@@ -343,6 +348,7 @@ var (
 		autoscaling.MaxScaleAnnotationKey,
 		StorageInitializerSourceUriInternalAnnotationKey,
 		"kubectl.kubernetes.io/last-applied-configuration",
+		ODHAuthorinoLabel,
 	}
 
 	RevisionTemplateLabelDisallowedList = []string{
