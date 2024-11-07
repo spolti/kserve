@@ -44,9 +44,7 @@ data:
         "memoryRequest": "1Gi",
         "memoryLimit": "1Gi",
         "cpuRequest": "1",
-        "cpuLimit": "1",
-        "maxBatchSize": "32",
-        "maxLatency": "5000"
+        "cpuLimit": "1"
     }
   agent: |-
     {
@@ -63,4 +61,13 @@ data:
         "memoryLimit": "1Gi",
         "cpuRequest": "100m",
         "cpuLimit": "1"
+    }
+  deploy: |-
+    {
+      "defaultDeploymentMode": "Serverless"
+    }
+  metricsAggregator: |-
+    {
+      "enableMetricAggregation": "false",
+      "enablePrometheusScraping" : "false"
     }

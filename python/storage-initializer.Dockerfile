@@ -20,9 +20,6 @@ ENV VIRTUAL_ENV=${VENV_PATH}
 RUN python -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Addressing vulnerability scans by upgrading pip/setuptools
-RUN python3 -m pip install --upgrade pip setuptools
-
 COPY kserve/pyproject.toml kserve/poetry.lock kserve/
 RUN cd kserve && poetry install --no-root --no-interaction --no-cache --extras "storage"
 COPY kserve kserve

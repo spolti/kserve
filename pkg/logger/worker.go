@@ -113,29 +113,6 @@ func (w *Worker) sendCloudEvent(logReq LogRequest) error {
 		}
 	}
 
-	if logReq.Url.Scheme == "https" {
-		caCertFilePath := filepath.Join(LoggerCaCertMountPath, logReq.CertName)
-		caCertFile, err := os.ReadFile(caCertFilePath)
-		// Do not fail if certificates not found, for backwards compatibility
-		if err == nil {
-			clientCertPool := x509.NewCertPool()
-			if !clientCertPool.AppendCertsFromPEM(caCertFile) {
-				return fmt.Errorf("while parsing CA certificate")
-			}
-
-			tlsTransport := &http.Transport{
-				TLSClientConfig: &tls.Config{
-					RootCAs:            clientCertPool,
-					MinVersion:         tls.VersionTLS12,
-					InsecureSkipVerify: logReq.TlsSkipVerify, // #nosec G402
-				},
-			}
-			t.Client.Transport = tlsTransport
-		} else {
-			w.Log.Warnf("using https endpoint but could not find CA cert file %s", caCertFilePath)
-		}
-	}
-
 	c, err := cloudevents.NewClient(t,
 		cloudevents.WithTimeNow(),
 	)
