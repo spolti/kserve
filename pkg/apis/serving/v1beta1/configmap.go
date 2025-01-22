@@ -31,12 +31,14 @@ import (
 
 // ConfigMap Keys
 const (
-	ExplainerConfigKeyName = "explainers"
-	IngressConfigKeyName   = "ingress"
-	DeployConfigName       = "deploy"
-	LocalModelConfigName   = "localModel"
-	SecurityConfigName     = "security"
-	ServiceConfigName      = "service"
+	ExplainerConfigKeyName        = "explainers"
+	InferenceServiceConfigKeyName = "inferenceService"
+	IngressConfigKeyName          = "ingress"
+	DeployConfigName              = "deploy"
+	LocalModelConfigName          = "localModel"
+	SecurityConfigName            = "security"
+	ServiceConfigName             = "service"
+	ResourceConfigName            = "resource"
 )
 
 const (
@@ -62,6 +64,13 @@ type ExplainersConfig struct {
 type InferenceServicesConfig struct {
 	// Explainer configurations
 	Explainers ExplainersConfig `json:"explainers"`
+	// ServiceAnnotationDisallowedList is a list of annotations that are not allowed to be propagated to Knative
+	// revisions
+	ServiceAnnotationDisallowedList []string `json:"serviceAnnotationDisallowedList,omitempty"`
+	// ServiceLabelDisallowedList is a list of labels that are not allowed to be propagated to Knative revisions
+	ServiceLabelDisallowedList []string `json:"serviceLabelDisallowedList,omitempty"`
+	// Resource configurations
+	Resource ResourceConfig `json:"resource,omitempty"`
 }
 
 // +kubebuilder:object:generate=false
@@ -102,6 +111,15 @@ type LocalModelConfig struct {
 	FSGroup                      *int64 `json:"fsGroup,omitempty"`
 	JobTTLSecondsAfterFinished   *int32 `json:"jobTTLSecondsAfterFinished,omitempty"`
 	ReconcilationFrequencyInSecs *int64 `json:"reconcilationFrequencyInSecs,omitempty"`
+	DisableVolumeManagement      bool   `json:"disableVolumeManagement,omitempty"`
+}
+
+// +kubebuilder:object:generate=false
+type ResourceConfig struct {
+	CPULimit      string `json:"cpuLimit,omitempty"`
+	MemoryLimit   string `json:"memoryLimit,omitempty"`
+	CPURequest    string `json:"cpuRequest,omitempty"`
+	MemoryRequest string `json:"memoryRequest,omitempty"`
 }
 
 // +kubebuilder:object:generate=false
@@ -117,16 +135,40 @@ type ServiceConfig struct {
 }
 
 func NewInferenceServicesConfig(clientset kubernetes.Interface) (*InferenceServicesConfig, error) {
-	configMap, err := clientset.CoreV1().ConfigMaps(constants.KServeNamespace).Get(context.TODO(), constants.InferenceServiceConfigMapName, metav1.GetOptions{})
+	configMap, err := clientset.CoreV1().ConfigMaps(constants.KServeNamespace).Get(
+		context.TODO(), constants.InferenceServiceConfigMapName, metav1.GetOptions{})
+
 	if err != nil {
 		return nil, err
 	}
 	icfg := &InferenceServicesConfig{}
 	for _, err := range []error{
 		getComponentConfig(ExplainerConfigKeyName, configMap, &icfg.Explainers),
+		getComponentConfig(InferenceServiceConfigKeyName, configMap, &icfg),
 	} {
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	if isvc, ok := configMap.Data[InferenceServiceConfigKeyName]; ok {
+		errisvc := json.Unmarshal([]byte(isvc), &icfg)
+		if errisvc != nil {
+			return nil, fmt.Errorf("unable to parse isvc config json: %w", errisvc)
+		}
+		if icfg.ServiceAnnotationDisallowedList == nil {
+			icfg.ServiceAnnotationDisallowedList = constants.ServiceAnnotationDisallowedList
+		} else {
+			icfg.ServiceAnnotationDisallowedList = append(
+				constants.ServiceAnnotationDisallowedList,
+				icfg.ServiceAnnotationDisallowedList...)
+		}
+		if icfg.ServiceLabelDisallowedList == nil {
+			icfg.ServiceLabelDisallowedList = constants.RevisionTemplateLabelDisallowedList
+		} else {
+			icfg.ServiceLabelDisallowedList = append(
+				constants.RevisionTemplateLabelDisallowedList,
+				icfg.ServiceLabelDisallowedList...)
 		}
 	}
 	return icfg, nil
