@@ -12,9 +12,6 @@ spec:
     matchLabels:
       control-plane: kserve-controller-manager
       controller-tools.k8s.io: "1.0"
-  strategy:
-    type: Recreate
-    rollingUpdate: nil
   template:
     metadata:
       labels:
@@ -30,6 +27,8 @@ spec:
       containers:
       - command:
         - /manager
+        args:
+        - "--leader-elect"
         image: ko://github.com/kserve/kserve/cmd/manager
         imagePullPolicy: Always
         name: manager
