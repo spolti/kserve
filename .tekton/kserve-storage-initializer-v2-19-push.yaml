@@ -14,7 +14,7 @@ metadata:
       && !"config/overlays/odh/params.env".pathChanged()
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: rhoai-v2-19
+    appstudio.openshift.io/application: external-rhoai-v2-19
     appstudio.openshift.io/component: kserve-storage-initializer-v2-19
     pipelines.appstudio.openshift.io/type: build
   name: kserve-storage-initializer-v2-19-on-push
