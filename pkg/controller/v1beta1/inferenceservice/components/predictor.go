@@ -88,10 +88,21 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 	if isvc.Spec.Predictor.WorkerSpec != nil {
 		multiNodeEnabled = true
 	}
+	var annotations map[string]string
+	if p.deploymentMode == constants.RawDeployment {
+		annotations = utils.Filter(isvc.Annotations, func(key string) bool {
+			// https://issues.redhat.com/browse/RHOAIENG-20326
+			// For RawDeployment, we allow the security.opendatahub.io/enable-auth annotation
+			return !utils.Includes(isvcutils.FilterList(p.inferenceServiceConfig.ServiceAnnotationDisallowedList, constants.ODHKserveRawAuth), key)
+		})
+	} else {
+		annotations = utils.Filter(isvc.Annotations, func(key string) bool {
+			return !utils.Includes(p.inferenceServiceConfig.ServiceAnnotationDisallowedList, key)
+		})
+	}
 
-	annotations := utils.Filter(isvc.Annotations, func(key string) bool {
-		return !utils.Includes(constants.ServiceAnnotationDisallowedList, key)
-	})
+	p.Log.V(1).Info("Predictor custom annotations", "annotations", p.inferenceServiceConfig.ServiceAnnotationDisallowedList)
+	p.Log.V(1).Info("Predictor custom labels", "labels", p.inferenceServiceConfig.ServiceLabelDisallowedList)
 
 	addLoggerAnnotations(isvc.Spec.Predictor.Logger, annotations)
 	addBatcherAnnotations(isvc.Spec.Predictor.Batcher, annotations)
@@ -228,9 +239,17 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 
 		// Label filter will be handled in ksvc_reconciler
 		sRuntimeLabels = sRuntime.ServingRuntimePodSpec.Labels
-		sRuntimeAnnotations = utils.Filter(sRuntime.ServingRuntimePodSpec.Annotations, func(key string) bool {
-			return !utils.Includes(constants.ServiceAnnotationDisallowedList, key)
-		})
+		if p.deploymentMode == constants.RawDeployment {
+			sRuntimeAnnotations = utils.Filter(sRuntime.ServingRuntimePodSpec.Annotations, func(key string) bool {
+				// https://issues.redhat.com/browse/RHOAIENG-20326
+				// For RawDeployment, we allow the security.opendatahub.io/enable-auth annotation
+				return !utils.Includes(isvcutils.FilterList(p.inferenceServiceConfig.ServiceAnnotationDisallowedList, constants.ODHKserveRawAuth), key)
+			})
+		} else {
+			sRuntimeAnnotations = utils.Filter(sRuntime.ServingRuntimePodSpec.Annotations, func(key string) bool {
+				return !utils.Includes(p.inferenceServiceConfig.ServiceAnnotationDisallowedList, key)
+			})
+		}
 	} else {
 		container = predictor.GetContainer(isvc.ObjectMeta, isvc.Spec.Predictor.GetExtensions(), p.inferenceServiceConfig)
 
@@ -260,11 +279,20 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 	}
 
 	// Labels and annotations from predictor component
-	// Label filter will be handled in ksvc_reconciler
+	// Label filter will be handled in ksvc_reconciler and raw reconciler
 	predictorLabels := isvc.Spec.Predictor.Labels
-	predictorAnnotations := utils.Filter(isvc.Spec.Predictor.Annotations, func(key string) bool {
-		return !utils.Includes(constants.ServiceAnnotationDisallowedList, key)
-	})
+	var predictorAnnotations map[string]string
+	if p.deploymentMode == constants.RawDeployment {
+		predictorAnnotations = utils.Filter(isvc.Spec.Predictor.Annotations, func(key string) bool {
+			// https://issues.redhat.com/browse/RHOAIENG-20326
+			// For RawDeployment, we allow the security.opendatahub.io/enable-auth annotation
+			return !utils.Includes(isvcutils.FilterList(p.inferenceServiceConfig.ServiceAnnotationDisallowedList, constants.ODHKserveRawAuth), key)
+		})
+	} else {
+		predictorAnnotations = utils.Filter(isvc.Spec.Predictor.Annotations, func(key string) bool {
+			return !utils.Includes(p.inferenceServiceConfig.ServiceAnnotationDisallowedList, key)
+		})
+	}
 
 	// Labels and annotations priority: predictor component > isvc > ServingRuntimePodSpec
 	// Labels and annotations from high priority will overwrite that from low priority
@@ -368,7 +396,7 @@ func (p *Predictor) Reconcile(isvc *v1beta1.InferenceService) (ctrl.Result, erro
 	} else {
 		podLabelKey = constants.RevisionLabel
 		r := knative.NewKsvcReconciler(p.client, p.scheme, objectMeta, &isvc.Spec.Predictor.ComponentExtensionSpec,
-			&podSpec, isvc.Status.Components[v1beta1.PredictorComponent])
+			&podSpec, isvc.Status.Components[v1beta1.PredictorComponent], p.inferenceServiceConfig.ServiceLabelDisallowedList)
 		if err := controllerutil.SetControllerReference(isvc, r.Service, p.scheme); err != nil {
 			return ctrl.Result{}, errors.Wrapf(err, "fails to set owner reference for predictor")
 		}
