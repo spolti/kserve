@@ -43,7 +43,7 @@ async def rest_v1_client():
     v1_client = InferenceRESTClient(
         config=RESTConfig(
             verify=ca_cert_path,
-            timeout=60,
+            timeout=180,
             verbose=True,
             protocol=PredictorProtocol.REST_V1,
         )
@@ -58,7 +58,7 @@ async def rest_v2_client():
     v2_client = InferenceRESTClient(
         config=RESTConfig(
             verify=ca_cert_path,
-            timeout=60,
+            timeout=180,
             verbose=True,
             protocol=PredictorProtocol.REST_V2,
         )

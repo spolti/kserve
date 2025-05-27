@@ -54,6 +54,7 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	knutils "github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/components"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/cabundleconfigmap"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/ingress"
@@ -224,6 +225,14 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 				"It is not possible to use Serverless deployment mode when Knative KnativeServings are not available")
 			return reconcile.Result{Requeue: false}, reconcile.TerminalError(fmt.Errorf("the resolved deployment mode of InferenceService '%s' is Serverless, but Knative KnativeServings are not available", isvc.Name))
 		}
+
+		// Retrieve the allow-zero-initial-scale value from the knative autoscaler configuration.
+		allowZeroInitialScale, err := knutils.CheckZeroInitialScaleAllowed(ctx, r.Clientset)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed to retrieve the knative autoscaler configuration")
+		}
+
+		knutils.ValidateInitialScaleAnnotation(isvc.Annotations, allowZeroInitialScale, r.Log)
 	}
 
 	// Setup reconcilers
@@ -269,8 +278,10 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if isvc.Spec.Explainer != nil {
 			componentList = append(componentList, v1beta1.ExplainerComponent)
 		}
-		isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.RoutesReady)
-		isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.LatestDeploymentReady)
+		if !isvc.GetForceStopRuntime() {
+			isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.RoutesReady)
+			isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.LatestDeploymentReady)
+		}
 	}
 	// Reconcile ingress
 	ingressConfig, err := v1beta1.NewIngressConfig(isvcConfigMap)
@@ -322,6 +333,7 @@ func (r *InferenceServiceReconciler) updateStatus(ctx context.Context, desiredSe
 ) error {
 	// set the DeploymentMode used for the InferenceService in the status
 	desiredService.Status.DeploymentMode = string(deploymentMode)
+
 	existingService := &v1beta1.InferenceService{}
 
 	namespacedName := types.NamespacedName{Name: desiredService.Name, Namespace: desiredService.Namespace}

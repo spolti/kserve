@@ -18,13 +18,7 @@ package knative
 
 import (
 	"context"
-	"fmt"
-	"strconv"
-
-	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
-	"github.com/kserve/kserve/pkg/constants"
-	knutils "github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
-	"github.com/kserve/kserve/pkg/utils"
+	"strings"
 
 	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
@@ -36,11 +30,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"knative.dev/pkg/kmp"
-	"knative.dev/serving/pkg/apis/autoscaling"
 	knserving "knative.dev/serving/pkg/apis/serving"
 	knservingv1 "knative.dev/serving/pkg/apis/serving/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
+	"github.com/kserve/kserve/pkg/constants"
+	knutils "github.com/kserve/kserve/pkg/controller/v1alpha1/utils"
+	"github.com/kserve/kserve/pkg/utils"
 )
 
 var log = logf.Log.WithName("KsvcReconciler")
@@ -59,7 +57,7 @@ type KsvcReconciler struct {
 	componentStatus v1beta1.ComponentStatusSpec
 }
 
-func NewKsvcReconciler(ctx context.Context,
+func NewKsvcReconciler(
 	client client.Client,
 	scheme *runtime.Scheme,
 	componentMeta metav1.ObjectMeta,
@@ -67,34 +65,33 @@ func NewKsvcReconciler(ctx context.Context,
 	podSpec *corev1.PodSpec,
 	componentStatus v1beta1.ComponentStatusSpec,
 	disallowedLabelList []string,
-) (*KsvcReconciler, error) {
-	ksvc, err := createKnativeService(ctx, client, componentMeta, componentExt, podSpec, componentStatus, disallowedLabelList)
-	if err != nil {
-		return nil, errors.Wrapf(err, "%s", "fails to create knative service for inference service "+componentMeta.Name)
-	}
+) *KsvcReconciler {
 	return &KsvcReconciler{
 		client:          client,
 		scheme:          scheme,
-		Service:         ksvc,
+		Service:         createKnativeService(componentMeta, componentExt, podSpec, componentStatus, disallowedLabelList),
 		componentExt:    componentExt,
 		componentStatus: componentStatus,
-	}, nil
+	}
 }
 
-func createKnativeService(ctx context.Context,
-	client client.Client,
+func createKnativeService(
 	componentMeta metav1.ObjectMeta,
 	componentExtension *v1beta1.ComponentExtensionSpec,
 	podSpec *corev1.PodSpec,
 	componentStatus v1beta1.ComponentStatusSpec,
 	disallowedLabelList []string,
-) (*knservingv1.Service, error) {
+) *knservingv1.Service {
 	annotations := componentMeta.GetAnnotations()
 
-	err := setAutoScalingAnnotations(ctx, client, annotations, componentExtension)
-	if err != nil {
-		return nil, errors.Wrapf(err, "fails to set autoscaling annotations for knative service")
-	}
+	knutils.SetAutoScalingAnnotations(
+		annotations,
+		componentExtension.ScaleTarget,
+		(*string)(componentExtension.ScaleMetric),
+		componentExtension.MinReplicas,
+		componentExtension.MaxReplicas,
+		log,
+	)
 
 	// ksvc metadata.annotations
 	// rollout-duration must be put under metadata.annotations
@@ -184,7 +181,7 @@ func createKnativeService(ctx context.Context,
 			},
 		},
 	}
-	return service, nil
+	return service
 }
 
 func reconcileKsvc(desired *knservingv1.Service, existing *knservingv1.Service) error {
@@ -223,10 +220,26 @@ func (r *KsvcReconciler) Reconcile(ctx context.Context) (*knservingv1.ServiceSta
 	desired := r.Service
 	existing := &knservingv1.Service{}
 
+	forceStopRuntime := false
+	if val, exist := desired.Spec.Template.Annotations[constants.StopAnnotationKey]; exist {
+		forceStopRuntime = strings.EqualFold(val, "true")
+	}
+
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		log.Info("Updating knative service", "namespace", desired.Namespace, "name", desired.Name)
 		if err := r.client.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing); err != nil {
 			return err
+		}
+
+		if forceStopRuntime {
+			log.Info("Stopping knative service", "namespace", existing.Namespace, "name", existing.Name)
+			if existing.GetDeletionTimestamp() == nil { // check if the ksvc was already deleted
+				err := r.client.Delete(ctx, existing)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 
 		// Set ResourceVersion which is required for update operation.
@@ -253,8 +266,12 @@ func (r *KsvcReconciler) Reconcile(ctx context.Context) (*knservingv1.ServiceSta
 	if err != nil {
 		// Create service if it does not exist
 		if apierr.IsNotFound(err) {
-			log.Info("Creating knative service", "namespace", desired.Namespace, "name", desired.Name)
-			return &desired.Status, r.client.Create(ctx, desired)
+			if !forceStopRuntime {
+				log.Info("Creating knative service", "namespace", desired.Namespace, "name", desired.Name)
+				return &desired.Status, r.client.Create(ctx, desired)
+			}
+
+			return &desired.Status, nil
 		}
 		return &existing.Status, errors.Wrapf(err, "fails to reconcile knative service")
 	}
@@ -272,77 +289,4 @@ func semanticEquals(desiredService, service *knservingv1.Service) bool {
 	return equality.Semantic.DeepEqual(desiredService.Spec.ConfigurationSpec, service.Spec.ConfigurationSpec) &&
 		equality.Semantic.DeepEqual(desiredService.ObjectMeta.Labels, service.ObjectMeta.Labels) &&
 		equality.Semantic.DeepEqual(desiredService.Spec.RouteSpec, service.Spec.RouteSpec)
-}
-
-// setAutoScalingAnnotations checks the knative autoscaler configuration defined in the knativeserving custom resource
-// and compares the values to the autoscaling configuration requested for the inference service.
-// It then sets the necessary annotations for the desired autoscaling configuration.
-func setAutoScalingAnnotations(ctx context.Context, client client.Client,
-	annotations map[string]string,
-	componentExtension *v1beta1.ComponentExtensionSpec,
-) error {
-	// User can pass down scaling class annotation to overwrite the default scaling KPA
-	if _, ok := annotations[autoscaling.ClassAnnotationKey]; !ok {
-		annotations[autoscaling.ClassAnnotationKey] = autoscaling.KPA
-	}
-
-	if componentExtension.ScaleTarget != nil {
-		annotations[autoscaling.TargetAnnotationKey] = strconv.Itoa(int(*componentExtension.ScaleTarget))
-	}
-
-	if componentExtension.ScaleMetric != nil {
-		annotations[autoscaling.MetricAnnotationKey] = fmt.Sprint(*componentExtension.ScaleMetric)
-	}
-
-	// If a minReplicas value is not set for the inference service, then use the default min-scale value of 1.
-	var revisionMinScale int32
-	if componentExtension.MinReplicas == nil {
-		annotations[autoscaling.MinScaleAnnotationKey] = strconv.Itoa(int(constants.DefaultMinReplicas))
-		revisionMinScale = constants.DefaultMinReplicas
-	} else {
-		annotations[autoscaling.MinScaleAnnotationKey] = strconv.Itoa(int(*componentExtension.MinReplicas))
-		revisionMinScale = *componentExtension.MinReplicas
-	}
-
-	if componentExtension.MaxReplicas != 0 {
-		annotations[autoscaling.MaxScaleAnnotationKey] = strconv.Itoa(int(componentExtension.MaxReplicas))
-	}
-
-	// Retrieve the allow-zero-initial-scale and initial-scale values from the knative autoscaler configuration.
-	allowZeroInitialScale, globalInitialScale, err := knutils.GetAutoscalerConfiguration(ctx, client)
-	if err != nil {
-		return errors.Wrapf(err, "failed to retrieve the knative autoscaler configuration")
-	}
-
-	initialScaleInt, err := utils.StringToInt32(globalInitialScale)
-	if err != nil {
-		return errors.Wrapf(err, "%s", fmt.Sprintf("failed to convert configured knative autoscaler global initial-scale value (%s) to an integer", globalInitialScale))
-	}
-
-	// Provide transparency to users while aligning with knative serving's expected behavior, log a warning when the
-	// knative autoscaler global initial-scale value exceeds the requested minScale value for the inference service.
-	if initialScaleInt > revisionMinScale {
-		log.Info("knative autoscaler is globally configured with an initial-scale value that is greater than the requested min-scale for the inference service",
-			"initial-scale", initialScaleInt,
-			"min-scale", revisionMinScale)
-	}
-
-	// knative will choose the larger of min-scale and initial-scale as the initial target scale for a knative revision.
-	// When min-scale is 0, if allow-zero-initial scale is true, set initial-scale to 0 for the created knative revision.
-	// This will prevent any pods from being created to initialize a knative revision when an inference service has minReplicas set to 0.
-	// Configuring scaling for knative: https://knative.dev/docs/serving/autoscaling/scale-bounds/#initial-scale
-	if revisionMinScale == 0 {
-		if allowZeroInitialScale == "true" {
-			log.Info("kserve will override the global knative autoscaler configuration for initial-scale on a per revision basis with 0 when an inference service is requested with min-scale 0",
-				"allow-zero-initial-scale", allowZeroInitialScale,
-				"initial-scale", globalInitialScale)
-			annotations[constants.InitialScaleAnnotationKey] = "0"
-		} else {
-			log.Info("The current knative autoscaler global configuration does not allow zero initial scale.",
-				"allow-zero-initial-scale", allowZeroInitialScale,
-				"initial-scale", globalInitialScale)
-		}
-	}
-
-	return nil
 }
