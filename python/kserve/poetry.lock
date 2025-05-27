@@ -5730,20 +5730,6 @@ files = [
 typing-extensions = ">=4.12.0"
 
 [[package]]
-name = "typing-inspection"
-version = "0.4.0"
-description = "Runtime typing introspection tools"
-optional = false
-python-versions = ">=3.9"
-files = [
-    {file = "typing_inspection-0.4.0-py3-none-any.whl", hash = "sha256:50e72559fcd2a6367a19f7a7e610e6afcb9fac940c650290eed893d61386832f"},
-    {file = "typing_inspection-0.4.0.tar.gz", hash = "sha256:9765c87de36671694a67904bf2c96e395be9c6439bb6c87b5142569dcdd65122"},
-]
-
-[package.dependencies]
-typing-extensions = ">=4.12.0"
-
-[[package]]
 name = "tzdata"
 version = "2025.2"
 description = "Provider of IANA time zone data"
