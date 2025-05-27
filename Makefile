@@ -130,7 +130,6 @@ poetry-lock: $(POETRY)
 	cd ./python && \
 	cd kserve && $(POETRY) lock --no-update && cd .. && \
 	for file in $$(find . -type f -name "pyproject.toml" -not -path "./pyproject.toml" -not -path "*.venv/*"); do \
-	  	echo `pwd`; \
 		folder=$$(dirname "$$file"); \
 		echo "moving into folder $$folder"; \
 		case "$$folder" in \
