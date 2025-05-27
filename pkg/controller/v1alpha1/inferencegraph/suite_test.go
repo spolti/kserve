@@ -125,6 +125,15 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient.Create(context.Background(), kserveNamespaceObj)).Should(Succeed())
 	Expect(k8sClient.Create(context.Background(), knativeServingNamespace)).Should(Succeed())
 
+	// Create knative config-autoscaler configmap
+	configAutoscaler := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      constants.AutoscalerConfigmapName,
+			Namespace: constants.AutoscalerConfigmapNamespace,
+		},
+	}
+	Expect(k8sClient.Create(context.Background(), configAutoscaler)).Should(Succeed())
+
 	// Create knativeserving custom resource
 	knativeCr := &operatorv1beta1.KnativeServing{
 		ObjectMeta: metav1.ObjectMeta{

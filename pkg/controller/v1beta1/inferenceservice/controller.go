@@ -269,8 +269,10 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if isvc.Spec.Explainer != nil {
 			componentList = append(componentList, v1beta1.ExplainerComponent)
 		}
-		isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.RoutesReady)
-		isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.LatestDeploymentReady)
+		if !isvc.GetForceStopRuntime() {
+			isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.RoutesReady)
+			isvc.Status.PropagateCrossComponentStatus(componentList, v1beta1.LatestDeploymentReady)
+		}
 	}
 	// Reconcile ingress
 	ingressConfig, err := v1beta1.NewIngressConfig(isvcConfigMap)
@@ -322,6 +324,7 @@ func (r *InferenceServiceReconciler) updateStatus(ctx context.Context, desiredSe
 ) error {
 	// set the DeploymentMode used for the InferenceService in the status
 	desiredService.Status.DeploymentMode = string(deploymentMode)
+
 	existingService := &v1beta1.InferenceService{}
 
 	namespacedName := types.NamespacedName{Name: desiredService.Name, Namespace: desiredService.Namespace}

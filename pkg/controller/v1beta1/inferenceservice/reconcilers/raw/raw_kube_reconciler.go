@@ -111,7 +111,7 @@ func NewRawKubeReconciler(ctx context.Context,
 		log.Error(err1, "failed to get service config")
 	}
 
-	depl, err := deployment.NewDeploymentReconciler(ctx, client, clientset, scheme, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec)
+	deployment, err := deployment.NewDeploymentReconciler(ctx, client, clientset, scheme, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func NewRawKubeReconciler(ctx context.Context,
 	return &RawKubeReconciler{
 		client:        client,
 		scheme:        scheme,
-		Deployment:    depl,
+		Deployment:    deployment,
 		Service:       service.NewServiceReconciler(client, scheme, resourceType, componentMeta, componentExt, podSpec, multiNodeEnabled, serviceConfig),
 		Scaler:        as,
 		OtelCollector: otelCollector,
