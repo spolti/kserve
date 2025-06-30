@@ -30,8 +30,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"knative.dev/operator/pkg/apis/operator/base"
-	operatorv1beta1 "knative.dev/operator/pkg/apis/operator/v1beta1"
 	knservingv1 "knative.dev/serving/pkg/apis/serving/v1"
 
 	ctrl "sigs.k8s.io/controller-runtime"

@@ -334,31 +334,6 @@ func (ss *InferenceServiceStatus) PropagateRawStatusWithMessages(
 	ss.Components[component] = statusSpec
 }
 
-func (ss *InferenceServiceStatus) PropagateRawStatusWithMessages(
-	component ComponentType,
-	reason string,
-	msg string,
-	targetStatus v1.ConditionStatus) {
-	if len(ss.Components) == 0 {
-		ss.Components = make(map[ComponentType]ComponentStatusSpec)
-	}
-
-	statusSpec, ok := ss.Components[component]
-	if !ok {
-		ss.Components[component] = ComponentStatusSpec{}
-	}
-
-	condition := &apis.Condition{
-		Reason:  reason,
-		Message: msg,
-		Status:  targetStatus,
-	}
-
-	readyCondition := readyConditionsMap[component]
-	ss.SetCondition(readyCondition, condition)
-	ss.Components[component] = statusSpec
-}
-
 func (ss *InferenceServiceStatus) PropagateRawStatus(
 	component ComponentType,
 	deploymentList []*appsv1.Deployment,

@@ -48,7 +48,6 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
 	pkgtest "github.com/kserve/kserve/pkg/testing"
-	routev1 "github.com/openshift/api/route/v1"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to

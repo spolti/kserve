@@ -25,8 +25,6 @@ import (
 
 	"github.com/onsi/gomega"
 
-	"testing"
-
 	"google.golang.org/protobuf/proto"
 
 	corev1 "k8s.io/api/core/v1"

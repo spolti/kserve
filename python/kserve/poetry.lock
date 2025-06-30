@@ -164,9 +164,6 @@ files = [
     {file = "annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89"},
 ]
 
-[package.dependencies]
-typing-extensions = {version = ">=4.0.0", markers = "python_version < \"3.9\""}
-
 [[package]]
 name = "anyio"
 version = "4.9.0"
@@ -4510,7 +4507,7 @@ name = "pyzmq"
 version = "26.4.0"
 description = "Python bindings for 0MQ"
 optional = true
-python-versions = ">=3.9"
+python-versions = ">=3.8"
 files = [
     {file = "pyzmq-26.4.0-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:0329bdf83e170ac133f44a233fc651f6ed66ef8e66693b5af7d54f45d1ef5918"},
     {file = "pyzmq-26.4.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:398a825d2dea96227cf6460ce0a174cf7657d6f6827807d4d1ae9d0f9ae64315"},
@@ -4642,11 +4639,13 @@ files = [
 [package.dependencies]
 aiohttp = {version = ">=3.7", optional = true, markers = "extra == \"serve\""}
 aiohttp-cors = {version = "*", optional = true, markers = "extra == \"serve\""}
+aiosignal = "*"
 click = ">=7.0"
 colorful = {version = "*", optional = true, markers = "extra == \"serve\""}
 cupy-cuda12x = {version = "*", optional = true, markers = "sys_platform != \"darwin\" and extra == \"cgraph\""}
 fastapi = {version = "*", optional = true, markers = "extra == \"serve\""}
 filelock = "*"
+frozenlist = "*"
 grpcio = [
     {version = ">=1.42.0", optional = true, markers = "python_version >= \"3.10\" and extra == \"serve\""},
     {version = ">=1.32.0", optional = true, markers = "python_version < \"3.10\" and extra == \"serve\""},
@@ -4654,9 +4653,6 @@ grpcio = [
 jsonschema = "*"
 msgpack = ">=1.0.0,<2.0.0"
 opencensus = {version = "*", optional = true, markers = "extra == \"serve\""}
-opentelemetry-exporter-prometheus = {version = "*", optional = true, markers = "extra == \"serve\""}
-opentelemetry-proto = {version = "*", optional = true, markers = "extra == \"serve\""}
-opentelemetry-sdk = {version = "*", optional = true, markers = "extra == \"serve\""}
 packaging = "*"
 prometheus-client = {version = ">=0.7.1", optional = true, markers = "extra == \"serve\""}
 protobuf = ">=3.15.3,<3.19.5 || >3.19.5"
@@ -6429,4 +6425,4 @@ storage = ["azure-identity", "azure-storage-blob", "azure-storage-file-share", "
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9,<3.13"
-content-hash = "eea3b437e01ce0e3b957c4c37e183f25f9185f662d32895ce0241eeee84c1873"
+content-hash = "11b04aa96f476d85ec0e10f53a9de9be8dc3caf1c21ccfe843a2b5b0ea2bdfdb"

@@ -43,8 +43,6 @@ var (
 	AutoscalerConfigmapNamespace = getEnvOrDefault("KNATIVE_CONFIG_AUTOSCALER_NAMESPACE", DefaultKnServingNamespace)
 )
 
-var KServeNamespace = getEnvOrDefault("POD_NAMESPACE", "kserve")
-
 // InferenceService Constants
 var (
 	InferenceServiceName                  = "inferenceservice"
@@ -406,7 +404,6 @@ var (
 	// revisions, which prevents the reconciliation loop to be triggered if the annotations is
 	// configured here are used.
 	ServiceAnnotationDisallowedList = []string{
-		autoscaling.InitialScaleAnnotationKey,
 		autoscaling.MinScaleAnnotationKey,
 		autoscaling.MaxScaleAnnotationKey,
 		StorageInitializerSourceUriInternalAnnotationKey,

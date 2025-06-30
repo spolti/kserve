@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/google/go-cmp/cmp"
-	isvcutils "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/utils"
 	"github.com/pkg/errors"
 	"google.golang.org/protobuf/testing/protocmp"
 	istiov1beta1 "istio.io/api/networking/v1beta1"

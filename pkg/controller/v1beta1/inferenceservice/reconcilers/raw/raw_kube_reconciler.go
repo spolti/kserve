@@ -115,21 +115,6 @@ func NewRawKubeReconciler(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	var multiNodeEnabled bool
-	if workerPodSpec != nil {
-		multiNodeEnabled = true
-	}
-
-	// do not return error as service config is optional
-	serviceConfig, err1 := v1beta1.NewServiceConfig(clientset)
-	if err1 != nil {
-		log.Error(err1, "failed to get service config")
-	}
-
-	depl, err := deployment.NewDeploymentReconciler(client, clientset, scheme, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec)
-	if err != nil {
-		return nil, err
-	}
 	return &RawKubeReconciler{
 		client:        client,
 		scheme:        scheme,

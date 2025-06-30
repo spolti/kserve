@@ -31,7 +31,6 @@ import (
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/tools/record"
-	operatorv1beta1 "knative.dev/operator/pkg/apis/operator/v1beta1"
 	knservingv1 "knative.dev/serving/pkg/apis/serving/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -47,8 +46,6 @@ import (
 
 	"github.com/kserve/kserve/pkg/utils"
 
-	routev1 "github.com/openshift/api/route/v1"
-
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
@@ -56,7 +53,6 @@ import (
 	trainedmodelcontroller "github.com/kserve/kserve/pkg/controller/v1alpha1/trainedmodel"
 	"github.com/kserve/kserve/pkg/controller/v1alpha1/trainedmodel/reconcilers/modelconfig"
 	v1beta1controller "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice"
-	"github.com/kserve/kserve/pkg/utils"
 	"github.com/kserve/kserve/pkg/webhook/admission/localmodelcache"
 	"github.com/kserve/kserve/pkg/webhook/admission/pod"
 	"github.com/kserve/kserve/pkg/webhook/admission/servingruntime"

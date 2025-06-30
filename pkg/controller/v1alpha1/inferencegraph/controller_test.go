@@ -676,12 +676,6 @@ var _ = Describe("Inference Graph controller test", func() {
 													MountPath: "/etc/odh/openshift-service-ca-bundle",
 												},
 											},
-											VolumeMounts: []v1.VolumeMount{
-												{
-													Name:      "openshift-service-ca-bundle",
-													MountPath: "/etc/odh/openshift-service-ca-bundle",
-												},
-											},
 										},
 									},
 									AutomountServiceAccountToken: proto.Bool(false),
@@ -842,12 +836,6 @@ var _ = Describe("Inference Graph controller test", func() {
 												},
 											},
 											VolumeMounts: []corev1.VolumeMount{
-												{
-													Name:      "openshift-service-ca-bundle",
-													MountPath: "/etc/odh/openshift-service-ca-bundle",
-												},
-											},
-											VolumeMounts: []v1.VolumeMount{
 												{
 													Name:      "openshift-service-ca-bundle",
 													MountPath: "/etc/odh/openshift-service-ca-bundle",

@@ -28,7 +28,6 @@ import (
 	"github.com/onsi/gomega"
 	otelv1beta1 "github.com/open-telemetry/opentelemetry-operator/apis/v1beta1"
 	"k8s.io/client-go/kubernetes/scheme"
-	operatorv1beta1 "knative.dev/operator/pkg/apis/operator/v1beta1"
 	knservingv1 "knative.dev/serving/pkg/apis/serving/v1"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
