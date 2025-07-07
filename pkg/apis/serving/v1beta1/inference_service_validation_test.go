@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/constants"
 
 	"google.golang.org/protobuf/proto"
@@ -31,7 +32,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func makeTestInferenceService() InferenceService {
@@ -1399,10 +1402,20 @@ func TestDeploymentModeUpdate(t *testing.T) {
 
 func TestValidateDelete(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
-	validator := InferenceServiceValidator{}
 
 	t.Run("Valid InferenceService object", func(t *testing.T) {
 		isvc := makeTestInferenceService()
+		s := runtime.NewScheme()
+		err := AddToScheme(s)
+		if err != nil {
+			t.Errorf("unable to add inference service kind scheme : %v", err)
+		}
+		err = v1alpha1.AddToScheme(s)
+		if err != nil {
+			t.Errorf("unable to add inference graph kind scheme : %v", err)
+		}
+		fakeClient := fake.NewClientBuilder().WithObjects(&isvc).WithScheme(s).Build()
+		validator := InferenceServiceValidator{fakeClient}
 		warnings, err := validator.ValidateDelete(context.TODO(), &isvc)
 		g.Expect(err).ShouldNot(gomega.HaveOccurred())
 		g.Expect(warnings).Should(gomega.BeEmpty())
@@ -1411,6 +1424,7 @@ func TestValidateDelete(t *testing.T) {
 	t.Run("Invalid object type", func(t *testing.T) {
 		// Use a valid runtime.Object type but not an InferenceService
 		notIsvc := &corev1.Pod{}
+		validator := InferenceServiceValidator{}
 		warnings, err := validator.ValidateDelete(context.TODO(), notIsvc)
 		g.Expect(err).Should(gomega.HaveOccurred())
 		g.Expect(warnings).Should(gomega.BeEmpty())

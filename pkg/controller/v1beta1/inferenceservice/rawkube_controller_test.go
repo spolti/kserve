@@ -558,7 +558,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				},
 				URL: &apis.URL{
 					Scheme: "http",
-					Host:   fmt.Sprintf("%s-predictor.%s.svc.cluster.local", serviceKey.Name, serviceKey.Namespace),
+					Host:   "raw-foo-default.example.com",
 				},
 				Address: &duckv1.Addressable{
 					URL: &apis.URL{
@@ -1117,7 +1117,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				},
 				URL: &apis.URL{
 					Scheme: "http",
-					Host:   fmt.Sprintf("%s-predictor.%s.svc.cluster.local", serviceKey.Name, serviceKey.Namespace),
+					Host:   "raw-foo-customized-default.example.com",
 				},
 				Address: &duckv1.Addressable{
 					URL: &apis.URL{
@@ -1672,7 +1672,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				},
 				URL: &apis.URL{
 					Scheme: "http",
-					Host:   fmt.Sprintf("%s-predictor.%s.svc.cluster.local", serviceKey.Name, serviceKey.Namespace),
+					Host:   "raw-foo-2-default.example.com",
 				},
 				Address: &duckv1.Addressable{
 					URL: &apis.URL{
@@ -3832,7 +3832,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				},
 				URL: &apis.URL{
 					Scheme: "http",
-					Host:   fmt.Sprintf("%s-predictor.%s.svc.cluster.local", serviceKey.Name, serviceKey.Namespace),
+					Host:   fmt.Sprintf("%s.%s.%s", serviceName, serviceKey.Namespace, domain),
 				},
 				Address: &duckv1.Addressable{
 					URL: &apis.URL{
