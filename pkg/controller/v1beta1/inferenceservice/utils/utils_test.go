@@ -20,7 +20,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
-	
+
 	"github.com/onsi/gomega/types"
 	"k8s.io/utils/ptr"
 	"knative.dev/pkg/apis"
