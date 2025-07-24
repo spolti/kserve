@@ -77,6 +77,8 @@ if [ "$1" != "raw" ]; then
 fi
 
 echo "Installing KServe with Minio"
+kustomize build $PROJECT_ROOT/config/crd | oc apply --server-side=true -f -
+oc wait --for=condition=Established --timeout=60s crd/llminferenceserviceconfigs.serving.kserve.io
 kustomize build $PROJECT_ROOT/config/overlays/test |
   sed "s|kserve/storage-initializer:latest|${STORAGE_INITIALIZER_IMAGE}|" |
   sed "s|kserve/agent:latest|${KSERVE_AGENT_IMAGE}|" |
