@@ -3315,7 +3315,15 @@
     },
     "v1beta1.InferenceServiceValidator": {
       "description": "InferenceServiceValidator is responsible for validating the InferenceService resource when it is created, updated, or deleted.\n\nNOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods, as this struct is used only for temporary operations and does not need to be deeply copied.",
-      "type": "object"
+      "type": "object",
+      "required": [
+        "Client"
+      ],
+      "properties": {
+        "Client": {
+          "$ref": "#/definitions/sigs.k8s.io.controller-runtime.pkg.client.Client"
+        }
+      }
     },
     "v1beta1.InferenceServicesConfig": {
       "type": "object",

@@ -6001,8 +6001,18 @@ func schema_pkg_apis_serving_v1beta1_InferenceServiceValidator(ref common.Refere
 			SchemaProps: spec.SchemaProps{
 				Description: "InferenceServiceValidator is responsible for validating the InferenceService resource when it is created, updated, or deleted.\n\nNOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods, as this struct is used only for temporary operations and does not need to be deeply copied.",
 				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"Client": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("sigs.k8s.io/controller-runtime/pkg/client.Client"),
+						},
+					},
+				},
+				Required: []string{"Client"},
 			},
 		},
+		Dependencies: []string{
+			"sigs.k8s.io/controller-runtime/pkg/client.Client"},
 	}
 }
 
