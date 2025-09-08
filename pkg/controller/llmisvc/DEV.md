@@ -476,6 +476,20 @@ EOF
 ```
 
 **Create a default GatewayClass**
+
+- OpenShift 4.19.9+
+```shell
+cat<<EOF|oc create -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: openshift-default
+spec:
+  controllerName: "openshift.io/gateway-controller/v1"
+EOF
+```
+
+- Others
 ```shell
 cat<<EOF|oc create -f -
 apiVersion: gateway.networking.k8s.io/v1
@@ -870,6 +884,27 @@ curl -v -X POST "${LB_URL}/v1/chat/completions" \
         {
             "role": "user",
             "content": "I need a comprehensive analysis of my retirement planning situation. I am 35 years old and plan to retire at 65. My current retirement savings are $250,000, all in a traditional 401(k). I contribute $22,500 annually. My risk tolerance is moderately aggressive. \n\nPlease address the following points:\n1.  Project the future value of my 401(k) at retirement. Use a reasonable annual growth rate for a moderately aggressive portfolio and show the formula you used.\n2.  Suggest a sample asset allocation for my portfolio (e.g., percentage in domestic stocks, international stocks, bonds, etc.) that aligns with my age and risk tolerance. Explain the rationale behind this allocation.\n3.  I am considering opening a Roth IRA in addition to my 401(k). Explain the key differences in tax treatment between my traditional 401(k) and a Roth IRA, especially concerning contributions and withdrawals in retirement.\n4.  My employer'\''s 401(k) plan offers a target-date fund, a large-cap US equity index fund, and an aggregate bond index fund. How could I use these three options to implement the asset allocation you suggested? What is portfolio rebalancing and why would it be important in this context?"
+        }
+    ],
+    "max_tokens": 2048,
+    "temperature": 0.4,
+    "top_p": 0.9
+}' | jq
+```
+
+```shell
+curl -v -X POST "${LB_URL}/v1/chat/completions" \
+-H "Content-Type: application/json" \
+-d '{
+    "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are DevBot Pro, a highly sophisticated AI developer assistant. Your purpose is to provide detailed, accurate, and educational information about software design and development."
+        },
+        {
+            "role": "user",
+            "content": "How do I implement AllReduce with Nvidia NCCL?"
         }
     ],
     "max_tokens": 2048,
