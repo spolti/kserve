@@ -666,6 +666,36 @@ kustomize build config/overlays/odh | kubectl apply  --server-side=true --force-
 kubectl wait --for=condition=ready pod -l control-plane=kserve-controller-manager -n opendatahub  --timeout=300s
 ```
 
+**Create a default GatewayClass**
+
+- OpenShift 4.19.9+
+```shell
+cat<<EOF|oc create -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: openshift-default
+spec:
+  controllerName: "openshift.io/gateway-controller/v1"
+EOF
+```
+
+- Others
+```shell
+cat<<EOF|oc create -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: openshift-default
+  annotations:
+    unsupported.do-not-use.openshift.io/ossm-channel: stable
+    unsupported.do-not-use.openshift.io/ossm-version: servicemeshoperator3.v3.1.0 
+    unsupported.do-not-use.openshift.io/istio-version: v1.26.2
+spec:
+  controllerName: "openshift.io/gateway-controller/v1"
+EOF
+```
+
 **Install OSSM by OCP**
 
 You have to add pullsecret for brew image on your cluster.
