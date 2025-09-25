@@ -17,10 +17,13 @@ limitations under the License.
 package utils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"k8s.io/client-go/kubernetes"
 
 	corev1 "k8s.io/api/core/v1"
 	apierr "k8s.io/apimachinery/pkg/api/errors"
@@ -457,4 +460,25 @@ func GetParentDirectory(path string) string {
 	}
 
 	return parentDir
+}
+
+// GetServiceAccountName returns the provided service account name if it exists in the given namespace. If not found
+// it returns the default service account name. If saName is empty, it returns the fallback if provided, otherwise the
+//
+//	default service account name.
+func GetServiceAccountName(ctx context.Context, clientset kubernetes.Interface, namespace string, saName string, fallbackSa string) (string, string) {
+	if saName == "" {
+		if fallbackSa == "" {
+			return constants.DefaultServiceAccount, "No service account or fallback provided, using default"
+		}
+		return fallbackSa, "No service account provided, using fallback " + fallbackSa
+	}
+	_, err := clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, saName, metav1.GetOptions{})
+	if err != nil {
+		if apierr.IsNotFound(err) {
+			return constants.DefaultServiceAccount, "Service account " + saName + " not found, using default"
+		}
+		return constants.DefaultServiceAccount, "Error retrieving service account " + saName + ", using default"
+	}
+	return saName, "Using provided service account " + saName
 }

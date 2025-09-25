@@ -44,6 +44,8 @@ import (
 	"github.com/kserve/kserve/pkg/utils"
 )
 
+const oauthProxyISVCConfigKey = "oauthProxy"
+
 func TestCreateDefaultDeployment(t *testing.T) {
 	type args struct {
 		clientset        kubernetes.Interface
@@ -866,6 +868,7 @@ func TestCreateDefaultDeployment(t *testing.T) {
 
 func TestOauthProxyUpstreamTimeout(t *testing.T) {
 	type args struct {
+		client           kclient.Client
 		clientset        kubernetes.Interface
 		objectMeta       metav1.ObjectMeta
 		workerObjectMeta metav1.ObjectMeta
@@ -885,7 +888,7 @@ func TestOauthProxyUpstreamTimeout(t *testing.T) {
 				clientset: fake.NewSimpleClientset(&corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{Name: constants.InferenceServiceConfigMapName, Namespace: constants.KServeNamespace},
 					Data: map[string]string{
-						oauthProxy: `{"image": "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:8507daed246d4d367704f7d7193233724acf1072572e1226ca063c066b858ecf", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m"}`,
+						oauthProxyISVCConfigKey: `{"image": "quay.io/opendatahub/odh-kube-auth-proxy@sha256:dcb09fbabd8811f0956ef612a0c9ddd5236804b9bd6548a0647d2b531c9d01b3", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m"}`,
 					},
 				}),
 				objectMeta: metav1.ObjectMeta{
@@ -912,7 +915,7 @@ func TestOauthProxyUpstreamTimeout(t *testing.T) {
 				clientset: fake.NewSimpleClientset(&corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{Name: constants.InferenceServiceConfigMapName, Namespace: constants.KServeNamespace},
 					Data: map[string]string{
-						oauthProxy: `{"image": "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:8507daed246d4d367704f7d7193233724acf1072572e1226ca063c066b858ecf", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m", "upstreamTimeoutSeconds": "20"}`,
+						oauthProxyISVCConfigKey: `{"image": "quay.io/opendatahub/odh-kube-auth-proxy@sha256:dcb09fbabd8811f0956ef612a0c9ddd5236804b9bd6548a0647d2b531c9d01b3", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m", "upstreamTimeoutSeconds": "20"}`,
 					},
 				}),
 				objectMeta: metav1.ObjectMeta{
@@ -939,7 +942,7 @@ func TestOauthProxyUpstreamTimeout(t *testing.T) {
 				clientset: fake.NewSimpleClientset(&corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{Name: constants.InferenceServiceConfigMapName, Namespace: constants.KServeNamespace},
 					Data: map[string]string{
-						oauthProxy: `{"image": "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:8507daed246d4d367704f7d7193233724acf1072572e1226ca063c066b858ecf", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m", "upstreamTimeoutSeconds": "20"}`,
+						oauthProxyISVCConfigKey: `{"image": "quay.io/opendatahub/odh-kube-auth-proxy@sha256:dcb09fbabd8811f0956ef612a0c9ddd5236804b9bd6548a0647d2b531c9d01b3", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m", "upstreamTimeoutSeconds": "20"}`,
 					},
 				}),
 				objectMeta: metav1.ObjectMeta{
@@ -968,6 +971,7 @@ func TestOauthProxyUpstreamTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			deployments, err := createRawDeploymentODH(
 				t.Context(),
+				tt.args.client,
 				tt.args.clientset,
 				constants.InferenceServiceResource,
 				tt.args.objectMeta,
