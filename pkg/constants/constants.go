@@ -118,6 +118,7 @@ var (
 	PrometheusPortAnnotationKey                 = "prometheus.io/port"
 	PrometheusPathAnnotationKey                 = "prometheus.io/path"
 	StorageReadonlyAnnotationKey                = "storage.kserve.io/readonly"
+	StorageOpenVINOAutoVersioningAnnotationKey  = "storage.kserve.io/ovms-auto-versioning"
 	DefaultPrometheusPath                       = "/metrics"
 	QueueProxyAggregatePrometheusMetricsPort    = "9088"
 	DefaultPodPrometheusPort                    = "9091"
@@ -189,6 +190,8 @@ const (
 
 	CpuModelcarDefault    = "10m"
 	MemoryModelcarDefault = "15Mi"
+
+	StorageOpenVINOAutoModelVersionKey = "STORAGE_OPENVINO_AUTO_VERSIONING"
 )
 
 // Controller Constants

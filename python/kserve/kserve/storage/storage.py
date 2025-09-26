@@ -32,6 +32,7 @@ import requests
 from ..logging import logger
 
 MODEL_MOUNT_DIRS = "/mnt/models"
+OPENVINO_VERSIONING_ENV_KEY = "STORAGE_OPENVINO_AUTO_VERSIONING"
 
 _GCS_PREFIX = "gs://"
 _S3_PREFIX = "s3://"
@@ -56,9 +57,11 @@ _HDFS_SECRET_DIRECTORY = "/var/secrets/kserve-hdfscreds"
 _HDFS_FILE_SECRETS = ["KERBEROS_KEYTAB", "TLS_CERT", "TLS_KEY", "TLS_CA"]
 
 
+
 class Storage(object):
     @staticmethod
     def download(uri: str, out_dir: str = None) -> str:
+
         start = time.monotonic()
         Storage._update_with_storage_spec()
         logger.info("Copying contents of %s to local", uri)
@@ -107,8 +110,9 @@ class Storage(object):
                     % (_GCS_PREFIX, _S3_PREFIX, _LOCAL_PREFIX, _HTTP_PREFIX, _HF_PREFIX)
                 )
 
-        logger.info("Successfully copied %s to %s", uri, out_dir)
+        logger.info("Successfully copied %s to %s", uri, model_dir)
         logger.info(f"Model downloaded in {time.monotonic() - start} seconds.")
+
         return model_dir
 
     @staticmethod
@@ -711,7 +715,6 @@ class Storage(object):
             mimetype, encoding = mimetypes.guess_type(url.query)
         else:
             mimetype, encoding = mimetypes.guess_type(url.path)
-        local_path = os.path.join(out_dir, filename)
 
         if filename == "":
             raise ValueError("No filename contained in URI: %s" % (uri))
@@ -722,6 +725,16 @@ class Storage(object):
 
         headers_json = os.getenv(host_uri + _HEADERS_SUFFIX, "{}")
         headers = json.loads(headers_json)
+
+        # determine out_dir for openvino
+        out_dir = Storage._is_versioned_model(out_dir, uri)
+
+        # Create the versioned directory if it doesn't exist
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir, exist_ok=True)
+
+        # Calculate local_path after versioning is applied
+        local_path = os.path.join(out_dir, filename)
 
         with requests.get(uri, stream=True, headers=headers) as response:
             if response.status_code != 200:
@@ -775,6 +788,7 @@ class Storage(object):
 
         if mimetype in ["application/x-tar", "application/zip"]:
             out_dir = Storage._unpack_archive_file(local_path, mimetype, out_dir)
+
         return out_dir
 
     @staticmethod
@@ -796,3 +810,61 @@ class Storage(object):
             ) from e
         os.remove(file_path)
         return target_dir
+
+    @staticmethod
+    def _is_versioned_model(storage_path, uri: str) -> str:
+        """Process URI for versioned model handling and return the appropriate URI.
+
+        This function handles OpenVINO versioned model requirements. OpenVINO specifically expects
+        models to be versioned with a numbered directory structure. This function will:
+
+        1. Return the original URI if it already contains a version number (numeric directory)
+        2. Auto-append a version directory when STORAGE_OPENVINO_ENABLED is set and URI is not versioned
+
+        Examples:
+            https://host1/models/mnist/1/model.onnx -> https://host1/models/mnist/1/model.onnx
+            https://host1/models/mnist/model.onnx -> https://host1/models/mnist/model.onnx (no env)
+            https://host1/models/mnist/model.onnx -> https://host1/models/mnist/1/model.onnx (with env)
+
+        OpenVINO expects this directory structure in the target location:
+        /mnt/models/1/
+            |-- model.onnx
+
+        The versioning behavior is controlled by the STORAGE_OPENVINO_ENABLED environment variable:
+        - If set to a number (e.g., "2"), uses that as the version
+        - If set to any non-numeric value, defaults to version "1"
+        - If not set, no auto-versioning is applied
+
+        Args:
+            uri (str): The source URI to process.
+
+        Returns:
+            str: The processed URI with version directory added if needed, or original URI.
+        """
+
+        parts = uri.rstrip("/").split("/")
+        if len(parts) < 2:
+            return storage_path
+        last_part = parts[-2]
+        is_versioned = last_part.isdigit()
+
+        openvino_version_str = os.getenv(OPENVINO_VERSIONING_ENV_KEY)
+
+        if is_versioned:
+            # For large numbers (like dates), only apply versioning if OpenVINO env is set
+            # For small numbers (typical version numbers), apply versioning automatically
+            if len(last_part) <= 4 or openvino_version_str:
+                return storage_path + "/" + last_part
+
+        if not is_versioned and openvino_version_str:
+            # Check if the provided version is a valid number, otherwise use "1" as default
+            if openvino_version_str.isdigit():
+                version = openvino_version_str
+            else:
+                version = "1"
+
+            logger.info("OpenVINO auto-versioning enabled, will create version %s directory structure", version)
+            return storage_path + "/" + version
+
+        # Return original URI if already versioned or no OpenVINO auto-versioning
+        return storage_path

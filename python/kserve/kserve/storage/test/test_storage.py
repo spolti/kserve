@@ -103,6 +103,19 @@ def test_http_uri_path(_):
     assert Storage.download(http_with_query_uri, out_dir=out_dir) == out_dir
     os.remove("./model.joblib")
 
+@mock.patch(
+    "requests.get",
+    return_value=MockHttpResponse(
+        status_code=200, content_type="application/octet-stream"
+    ),
+)
+def test_http_uri_path_ovms(_):
+    http_uri = "http://foo.bar//models/1/model.joblib"
+    out_dir = "."
+    assert Storage.download(http_uri, out_dir=out_dir) == "./1"
+    print(Storage.download(http_uri, out_dir=out_dir))
+    os.remove("./1/model.joblib")
+
 
 @mock.patch(
     "requests.get",
@@ -290,3 +303,47 @@ def test_download_azure_file_share_called_with_matching_uri(
 
     expected_calls = [mock.call(uri, "dest_path") for uri in azure_file_uris]
     mock_download_azure_file_share.assert_has_calls(expected_calls)
+
+
+# Tests for _is_versioned_model URI processing
+def test_versioned_model_already_versioned():
+    """Test versioned URI returns storage_path unchanged."""
+    storage_path = "/mnt/models"
+    uri = "https://host1/models/mnist/1/model.onnx"
+    result = Storage._is_versioned_model(storage_path, uri)
+    assert result == "/mnt/models/1"
+
+
+def test_versioned_model_non_versioned_without_env():
+    """Test non-versioned URI without env returns storage_path unchanged."""
+    storage_path = "/mnt/models"
+    uri = "https://host1/models/mnist/model.onnx"
+    result = Storage._is_versioned_model(storage_path, uri)
+    assert result == "/mnt/models"
+
+
+@mock.patch.dict(os.environ, {"STORAGE_OPENVINO_AUTO_VERSIONING": "1"})
+def test_versioned_model_non_versioned_with_env():
+    """Test non-versioned URI with env appends version to storage_path."""
+    storage_path = "/mnt/models"
+    uri = "https://host1/models/mnist/model.onnx"
+    result = Storage._is_versioned_model(storage_path, uri)
+    assert result == "/mnt/models/1"
+
+
+@mock.patch.dict(os.environ, {"STORAGE_OPENVINO_AUTO_VERSIONING": "3"})
+def test_versioned_model_custom_version():
+    """Test custom version number appended to storage_path."""
+    storage_path = "/mnt/models"
+    uri = "s3://bucket/models/model.bin"
+    result = Storage._is_versioned_model(storage_path, uri)
+    assert result == "/mnt/models/3"
+
+
+@mock.patch.dict(os.environ, {"STORAGE_OPENVINO_AUTO_VERSIONING": "invalid"})
+def test_versioned_model_invalid_version_defaults_to_1():
+    """Test invalid version defaults to 1."""
+    storage_path = "/mnt/models"
+    uri = "gs://bucket/models/model.xml"
+    result = Storage._is_versioned_model(storage_path, uri)
+    assert result == "/mnt/models/1"
