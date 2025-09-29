@@ -2,15 +2,10 @@ apiVersion: serving.kserve.io/v1alpha1
 kind: LLMInferenceService
 metadata:
   name: qwen2-7b-instruct-pd
-<<<<<<< HEAD
-spec:
-  replicas: 3
-=======
   annotations:
     k8s.v1.cni.cncf.io/networks: roce-p2
 spec:
   replicas: 1
->>>>>>> odh/release-v0.15
   model:
     uri: hf://Qwen/Qwen2.5-7B-Instruct
     name: Qwen/Qwen2.5-7B-Instruct
@@ -76,39 +71,27 @@ spec:
     containers:
       - name: main
         env:
-<<<<<<< HEAD
-=======
           - name: KSERVE_INFER_ROCE
             value: "true"
->>>>>>> odh/release-v0.15
           - name: VLLM_NIXL_SIDE_CHANNEL_HOST
             valueFrom:
               fieldRef:
                 fieldPath: status.podIP
           - name: VLLM_ADDITIONAL_ARGS
             value: "--kv_transfer_config '{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\"}'"
-<<<<<<< HEAD
-=======
           - name: UCX_PROTO_INFO
             value: "y"
->>>>>>> odh/release-v0.15
         resources:
           limits:
             cpu: '4'
             memory: 32Gi
             nvidia.com/gpu: "1"
-<<<<<<< HEAD
-=======
             rdma/roce_gdr: 1
->>>>>>> odh/release-v0.15
           requests:
             cpu: '2'
             memory: 16Gi
             nvidia.com/gpu: "1"
-<<<<<<< HEAD
-=======
             rdma/roce_gdr: 1
->>>>>>> odh/release-v0.15
         livenessProbe:
           httpGet:
             path: /health
@@ -119,48 +102,32 @@ spec:
           timeoutSeconds: 30
           failureThreshold: 5
   prefill:
-<<<<<<< HEAD
-    replicas: 2
-=======
     replicas: 1
->>>>>>> odh/release-v0.15
     template:
       containers:
         - name: main
           env:
-<<<<<<< HEAD
-=======
             - name: KSERVE_INFER_ROCE
               value: "true"
->>>>>>> odh/release-v0.15
             - name: VLLM_NIXL_SIDE_CHANNEL_HOST
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
             - name: VLLM_ADDITIONAL_ARGS
               value: "--kv_transfer_config '{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_both\"}'"
-<<<<<<< HEAD
-=======
             - name: UCX_PROTO_INFO
               value: "y"
->>>>>>> odh/release-v0.15
           resources:
             limits:
               cpu: '4'
               memory: 32Gi
               nvidia.com/gpu: "1"
-<<<<<<< HEAD
-=======
               rdma/roce_gdr: 1
->>>>>>> odh/release-v0.15
             requests:
               cpu: '2'
               memory: 16Gi
               nvidia.com/gpu: "1"
-<<<<<<< HEAD
-=======
               rdma/roce_gdr: 1
->>>>>>> odh/release-v0.15
           livenessProbe:
             httpGet:
               path: /health
