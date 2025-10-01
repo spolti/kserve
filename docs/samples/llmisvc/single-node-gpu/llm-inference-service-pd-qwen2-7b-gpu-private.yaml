@@ -18,9 +18,9 @@ spec:
           args:
           - -v=4 # Debug level
           - --poolName
-          - qwen2-7b-instruct-pd-inference-pool
+          - "{{ ChildName .ObjectMeta.Name `-inference-pool` }}"
           - --poolNamespace
-          - llm-test
+          - "{{ .ObjectMeta.Namespace }}"
           - --zap-encoder
           - json
           - --grpcPort
@@ -68,8 +68,20 @@ spec:
     route: { }
     gateway: { }
   template:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                    - pokprod-b93r38s1
+    imagePullSecrets:
+    - name: "quay-registry-wseaton"
     containers:
       - name: main
+        image: quay.io/aipcc/rhaiis/cuda-ubi9:3.2.2-1757699034
         env:
           - name: KSERVE_INFER_ROCE
             value: "true"
@@ -104,8 +116,20 @@ spec:
   prefill:
     replicas: 1
     template:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - pokprod-b93r39s1
+      imagePullSecrets:
+        - name: "quay-registry-wseaton"
       containers:
         - name: main
+          image: quay.io/aipcc/rhaiis/cuda-ubi9:3.2.2-1757699034
           env:
             - name: KSERVE_INFER_ROCE
               value: "true"

@@ -475,35 +475,6 @@ spec:
 EOF
 ```
 
-**Create a default GatewayClass**
-
-- OpenShift 4.19.9+
-```shell
-cat<<EOF|oc create -f -
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
-metadata:
-  name: openshift-default
-spec:
-  controllerName: "openshift.io/gateway-controller/v1"
-EOF
-```
-
-- Others
-```shell
-cat<<EOF|oc create -f -
-apiVersion: gateway.networking.k8s.io/v1
-kind: GatewayClass
-metadata:
-  name: openshift-default
-  annotations:
-    unsupported.do-not-use.openshift.io/ossm-channel: stable
-    unsupported.do-not-use.openshift.io/ossm-version: servicemeshoperator3.v3.1.0 
-    unsupported.do-not-use.openshift.io/istio-version: v1.26.2
-spec:
-  controllerName: "openshift.io/gateway-controller/v1"
-EOF
-```
 
 **Deploy Kserve** 
 *- option 1 - through custom opendatahub-operator catalogsource*
@@ -927,6 +898,27 @@ curl -v -X POST "${LB_URL}/v1/chat/completions" \
 -H "Content-Type: application/json" \
 -d '{
     "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are DevBot Pro, a highly sophisticated AI developer assistant. Your purpose is to provide detailed, accurate, and educational information about software design and development."
+        },
+        {
+            "role": "user",
+            "content": "How do I implement AllReduce with Nvidia NCCL?"
+        }
+    ],
+    "max_tokens": 2048,
+    "temperature": 0.4,
+    "top_p": 0.9
+}' | jq
+```
+
+```shell
+curl -v -X POST "${LB_URL}/v1/chat/completions" \
+-H "Content-Type: application/json" \
+-d '{
+    "model": "deepseek-ai/DeepSeek-R1-0528",
     "messages": [
         {
             "role": "system",
