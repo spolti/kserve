@@ -863,7 +863,7 @@ create_serving_runtimes() {
 
             # Check if the runtime name is exactly ovms
             if [[ "$original_runtime" == "ovms" ]]; then
-                echo "  ✅ Detected OpenVINO Model Server runtime, using kserve-ovms template"
+                echo "  ${SUCCESS_SYMBOL} Detected OpenVINO Model Server runtime, using kserve-ovms template"
                 runtime_templates+=("kserve-ovms")
                 runtime_names+=("kserve-ovms")
             else
@@ -988,6 +988,28 @@ clone_storage_secrets() {
                 fi
             fi
         done <<< "$user_secrets"
+
+        # If no storage key match found but we have a storage URI, check for URI field matches
+        if [[ -z "$prioritized_secret" && -n "$current_storage_uri" ]]; then
+            echo "🔍 No storage key found, checking for URI field matches in secrets..."
+            for secret_name in "${temp_secrets[@]}"; do
+                # Get the secret and check if it has a URI field
+                local secret_data=$(oc get secret "$secret_name" -n "$FROM_NS" -o jsonpath='{.data.URI}' 2>/dev/null || echo "")
+                if [[ -n "$secret_data" ]]; then
+                    # Decode the base64 URI field
+                    local decoded_uri=$(echo "$secret_data" | base64 -d 2>/dev/null || echo "")
+                    if [[ -n "$decoded_uri" && "$decoded_uri" == "$current_storage_uri" ]]; then
+                        prioritized_secret="$secret_name"
+                        echo "  ✅ Found URI match in secret '$secret_name': $decoded_uri"
+                        break
+                    else
+                        echo "  🔍 Secret '$secret_name' URI: $decoded_uri (no match)"
+                    fi
+                else
+                    echo "  ℹ️  Secret '$secret_name' does not contain URI field"
+                fi
+            done
+        fi
 
         # Build final array with prioritized secret first
         if [[ -n "$prioritized_secret" ]]; then
