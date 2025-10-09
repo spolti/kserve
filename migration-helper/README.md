@@ -299,6 +299,7 @@ PARAMETERS:
     --ignore-existing-ns       Skip check if target namespace already exists
     --debug                    Show complete processed resources and wait for user confirmation
     --dry-run                  Save all YAML resources to local directory without applying them
+    --odh                      Use OpenDataHub template namespace (opendatahub) instead of RHOAI (redhat-ods-applications)
     --page-size <number>       Number of InferenceServices to display per page (default: 10)
     -h, --help                 Show this help message
 

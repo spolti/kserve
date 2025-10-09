@@ -63,6 +63,7 @@ parse_arguments() {
     DRY_RUN=false
     DRY_RUN_DIR=""
     PAGE_SIZE=10
+    USE_ODH=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -84,6 +85,10 @@ parse_arguments() {
                 ;;
             --dry-run)
                 DRY_RUN=true
+                shift 1
+                ;;
+            --odh)
+                USE_ODH=true
                 shift 1
                 ;;
             --page-size)
@@ -140,6 +145,7 @@ PARAMETERS:
     --ignore-existing-ns       Skip check if target namespace already exists
     --debug                    Show complete processed resources and wait for user confirmation
     --dry-run                  Save all YAML resources to local directory without applying them
+    --odh                      Use OpenDataHub template namespace (opendatahub) instead of RHOAI (redhat-ods-applications)
     --page-size <number>       Number of InferenceServices to display per page (default: 10)
     -h, --help                 Show this help message
 
@@ -155,6 +161,7 @@ EXAMPLES:
     $0 --from-ns my-models --target-ns my-models-raw --page-size 5
     $0 --from-ns modelmesh-serving --target-ns kserve-raw --ignore-existing-ns --page-size 20
     $0 --from-ns large-ns --target-ns kserve-raw --dry-run --page-size 50
+    $0 --from-ns modelmesh-serving --target-ns kserve-raw --odh
 
 REQUIREMENTS:
     - oc (OpenShift CLI)
@@ -190,6 +197,13 @@ check_dependencies
 
 # Parse command line arguments
 parse_arguments "$@"
+
+# Set template namespace based on ODH flag
+if [[ "$USE_ODH" == "true" ]]; then
+    TEMPLATE_NAMESPACE="opendatahub"
+else
+    TEMPLATE_NAMESPACE="redhat-ods-applications"
+fi
 
 # Check OpenShift login status
 check_openshift_login
@@ -321,10 +335,10 @@ verify_modelmesh_namespace() {
 
 # Cache available templates to avoid repeated oc calls
 cache_available_templates() {
-    echo "🔍 Caching available templates from redhat-ods-applications namespace..."
+    echo "🔍 Caching available templates from $TEMPLATE_NAMESPACE namespace..."
 
-    # Get all templates from redhat-ods-applications namespace
-    AVAILABLE_TEMPLATES=$(oc get templates -n redhat-ods-applications --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+    # Get all templates from template namespace
+    AVAILABLE_TEMPLATES=$(oc get templates -n "$TEMPLATE_NAMESPACE" --no-headers 2>/dev/null | awk '{print $1}' || echo "")
 
     if [[ -n "$AVAILABLE_TEMPLATES" ]]; then
         TEMPLATE_ARRAY=()
@@ -334,14 +348,14 @@ cache_available_templates() {
             if [[ -n "$template_name" ]]; then
                 TEMPLATE_ARRAY+=("$template_name")
                 # Cache the description for each template
-                local template_description=$(oc get template "$template_name" -n redhat-ods-applications -o jsonpath='{.metadata.annotations.description}' 2>/dev/null || echo "")
+                local template_description=$(oc get template "$template_name" -n "$TEMPLATE_NAMESPACE" -o jsonpath='{.metadata.annotations.description}' 2>/dev/null || echo "")
                 TEMPLATE_DISPLAY_ARRAY+=("$template_description")
             fi
         done <<< "$AVAILABLE_TEMPLATES"
 
-        echo -e "${SUCCESS_SYMBOL} Cached ${#TEMPLATE_ARRAY[@]} template(s) with display names from redhat-ods-applications namespace"
+        echo -e "${SUCCESS_SYMBOL} Cached ${#TEMPLATE_ARRAY[@]} template(s) with display names from $TEMPLATE_NAMESPACE namespace"
     else
-        echo "⚠️  No templates found in redhat-ods-applications namespace"
+        echo "⚠️  No templates found in $TEMPLATE_NAMESPACE namespace"
     fi
 
     echo ""
@@ -740,7 +754,7 @@ select_template_interactively() {
 get_manual_template_name() {
     echo "  📝 Enter template name manually:"
     echo "  💡 Available templates can be listed with:"
-    echo "     oc get templates -n redhat-ods-applications | grep kserve"
+    echo "     oc get templates -n $TEMPLATE_NAMESPACE | grep kserve"
     echo ""
 
     while true; do
@@ -766,14 +780,14 @@ get_manual_template_name() {
             esac
         else
             # Validate that the manually entered template exists
-            echo "  🔍 Validating template '$manual_template' in redhat-ods-applications namespace..."
+            echo "  🔍 Validating template '$manual_template' in $TEMPLATE_NAMESPACE namespace..."
 
-            if oc get template "$manual_template" -n redhat-ods-applications &> /dev/null; then
+            if oc get template "$manual_template" -n "$TEMPLATE_NAMESPACE" &> /dev/null; then
                 echo "  ✅ Template '$manual_template' found and validated" >&2
                 echo "$manual_template"
                 return
             else
-                echo "  ❌ Template '$manual_template' not found in redhat-ods-applications namespace" >&2
+                echo "  ❌ Template '$manual_template' not found in $TEMPLATE_NAMESPACE namespace" >&2
                 echo "  🤔 Options:" >&2
                 echo "    1) Enter a different template name" >&2
                 echo "    2) Use default (kserve-ovms)" >&2
@@ -874,16 +888,16 @@ create_serving_runtimes() {
 
         echo "🏗️ Creating serving runtime for model '$isvc_name' using template '$template_name'..."
 
-        # Get the template from redhat-ods-applications namespace
-        local runtime_template=$(oc get template "$template_name" -n redhat-ods-applications -o yaml 2>/dev/null)
+        # Get the template from template namespace
+        local runtime_template=$(oc get template "$template_name" -n "$TEMPLATE_NAMESPACE" -o yaml 2>/dev/null)
 
         if [[ $? -ne 0 ]]; then
-            echo -e "${ERROR_SYMBOL} Error: Failed to retrieve '$template_name' template from redhat-ods-applications namespace"
-            echo "📋 Please ensure the template '$template_name' exists in the redhat-ods-applications namespace."
+            echo -e "${ERROR_SYMBOL} Error: Failed to retrieve '$template_name' template from $TEMPLATE_NAMESPACE namespace"
+            echo "📋 Please ensure the template '$template_name' exists in the $TEMPLATE_NAMESPACE namespace."
             exit 1
         fi
 
-        echo -e "  ${SUCCESS_SYMBOL} Retrieved template '$template_name' from redhat-ods-applications namespace"
+        echo -e "  ${SUCCESS_SYMBOL} Retrieved template '$template_name' from $TEMPLATE_NAMESPACE namespace"
 
         # Get template display name from the template
         # TODO seee if it is needed, we can inherit it from the template as we are not going to update it
@@ -961,14 +975,43 @@ clone_storage_secrets() {
         echo "==================================================="
 
         local secret_array=()
-        local index=1
+        local prioritized_secret=""
+
+        # First pass: collect all secrets and check for storage key match
+        local temp_secrets=()
         while IFS= read -r secret_name; do
             if [[ -n "$secret_name" ]]; then
-                secret_array+=("$secret_name")
-                echo "  [$index] $secret_name"
-                index=$((index+1))
+                temp_secrets+=("$secret_name")
+                # Check if this secret matches the current storage key
+                if [[ -n "$current_storage_key" && "$secret_name" == "$current_storage_key" ]]; then
+                    prioritized_secret="$secret_name"
+                fi
             fi
         done <<< "$user_secrets"
+
+        # Build final array with prioritized secret first
+        if [[ -n "$prioritized_secret" ]]; then
+            secret_array+=("$prioritized_secret")
+            # Add remaining secrets (excluding the prioritized one)
+            for secret in "${temp_secrets[@]}"; do
+                if [[ "$secret" != "$prioritized_secret" ]]; then
+                    secret_array+=("$secret")
+                fi
+            done
+        else
+            secret_array=("${temp_secrets[@]}")
+        fi
+
+        # Display secrets with hints
+        local index=1
+        for secret_name in "${secret_array[@]}"; do
+            if [[ -n "$prioritized_secret" && "$secret_name" == "$prioritized_secret" ]]; then
+                echo "  [$index] $secret_name (referenced by current model)"
+            else
+                echo "  [$index] $secret_name"
+            fi
+            index=$((index+1))
+        done
 
         if [[ ${#secret_array[@]} -gt 0 ]]; then
             echo ""
