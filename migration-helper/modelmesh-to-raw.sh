@@ -351,6 +351,13 @@ cache_available_templates() {
 create_target_namespace() {
     echo "🚀 Setting up target namespace for KServe Raw deployment..."
 
+    # Skip actual namespace creation in dry-run mode
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "📁 [DRY-RUN] skipping target namespace ['$TARGET_NS']."
+        echo ""
+        return 0
+    fi
+
     # Check if target namespace already exists (unless --ignore-existing-ns is set)
     if oc get namespace "$TARGET_NS" &> /dev/null; then
         if [[ "$IGNORE_EXISTING_NS" == "true" ]]; then
@@ -936,6 +943,7 @@ clone_storage_secrets() {
     local current_isvc="$1"
     local storage_path="$2"
     local storage_uri="$3"
+    local current_storage_key="$4"
     echo ""
     echo "🔐 Secret Management for InferenceService '$current_isvc'"
     echo "======================================================="
@@ -1146,7 +1154,7 @@ copy_authentication_resources() {
     fi
 
     # Create new ServiceAccount (not copied from source namespace)
-    echo "🔄 Creating ServiceAccount '$target_sa_name'..."
+    echo "  🔄 Creating ServiceAccount '$target_sa_name'..."
     local sa_yaml="kind: ServiceAccount
 apiVersion: v1
 metadata:
@@ -1166,7 +1174,7 @@ ${owner_ref_yaml}"
     save_original_resource "serviceaccount" "$source_sa_name" "$FROM_NS"
 
     if apply_or_save_resource "serviceaccount" "$target_sa_name" "$sa_yaml" "$TARGET_NS"; then
-        echo -e "${SUCCESS_SYMBOL} Created ServiceAccount '$target_sa_name' in namespace '$TARGET_NS'"
+        echo -e "   ${SUCCESS_SYMBOL} Created ServiceAccount '$target_sa_name' in namespace '$TARGET_NS'"
     else
         ERRORS+=("Failed to create ServiceAccount '$target_sa_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
     fi
@@ -1201,7 +1209,7 @@ rules:
     save_original_resource "role" "$source_role_name" "$FROM_NS"
 
     if apply_or_save_resource "role" "$target_role_name" "$role_yaml" "$TARGET_NS"; then
-        echo -e "${SUCCESS_SYMBOL} Created Role '$target_role_name' in namespace '$TARGET_NS'"
+        echo -e " ${SUCCESS_SYMBOL} Created Role '$target_role_name' in namespace '$TARGET_NS'"
     else
         ERRORS+=("Failed to create Role '$target_role_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
     fi
@@ -1264,7 +1272,7 @@ roleRef:
             if [[ ${#secret_array[@]} -eq 1 ]]; then
                 # Only one secret found, use it automatically
                 local selected_secret="${secret_array[0]}"
-                echo "✅ Automatically selecting the only available secret: $selected_secret"
+                echo "${SUCCESS_SYMBOL} Automatically selecting the only available secret: $selected_secret"
             else
                 # Multiple secrets found, ask user to select
                 echo "🤔 Multiple service account token secrets found. Please select one:"
@@ -1292,7 +1300,7 @@ roleRef:
                 ERRORS+=("Failed to get secret '$selected_secret' from '$FROM_NS': $secret_yaml")
                 echo -e "${ERROR_SYMBOL} Failed to get secret '$selected_secret' from source namespace"
             else
-                echo "✅ Successfully retrieved secret '$selected_secret' from source namespace"
+                echo "  ${SUCCESS_SYMBOL} Successfully retrieved secret '$selected_secret' from source namespace"
 
                 # Create a new service account token for the target namespace
                 echo "🔄 Creating new service account token for target namespace..."
@@ -1327,7 +1335,7 @@ EOF
                     ERRORS+=("Failed to transform secret YAML: $transformed_secret")
                     return
                 fi
-                echo "✅ Successfully transformed secret YAML"
+                echo "${SUCCESS_SYMBOL} Successfully transformed secret YAML"
                 echo "🔄 Applying transformed secret to target namespace..."
 
                 echo "$transformed_secret" > /tmp/secret.yaml
@@ -1345,10 +1353,12 @@ EOF
 
                     local apply_output=$(echo "$transformed_secret" | oc apply -n "$TARGET_NS" -f - 2>&1)
                     local apply_exit_code=$?
-                    echo "🔍 Debug: Apply exit code: $apply_exit_code | output: $apply_output"
+                    if [[ "$DEBUG_MODE" == "true" ]]; then
+                        echo "🔍 Debug: Apply exit code: $apply_exit_code | output: $apply_output"
+                    fi
 
                     if [[ $apply_exit_code -eq 0 ]]; then
-                        echo "✅ Secret applied successfully, checking persistence..."
+                        echo "${SUCCESS_SYMBOL} Secret applied successfully, checking persistence..."
                         # Wait a moment for any automatic deletions to occur
                         sleep 3
 
@@ -1456,11 +1466,12 @@ process_inference_services() {
         # Get current storage configuration for this model
         local current_path=$(echo "$original_isvc" | yq '.spec.predictor.model.storage.path // ""')
         local current_storage_uri=$(echo "$original_isvc" | yq '.spec.predictor.model.storageUri // ""')
+        local current_storage_key=$(echo "$original_isvc" | yq '.spec.predictor.model.storage.key // ""')
 
         # Handle secrets for this specific inference service
         SELECTED_SECRET_FOR_ISVC=""  # Clear previous value
         local selected_storage_secret=""
-        clone_storage_secrets "$isvc_name" "$current_path" "$current_storage_uri"
+        clone_storage_secrets "$isvc_name" "$current_path" "$current_storage_uri" "$current_storage_key"
         selected_storage_secret="$SELECTED_SECRET_FOR_ISVC"
 
         # Check if the original ServingRuntime has route exposure and authentication enabled
@@ -1526,13 +1537,13 @@ process_inference_services() {
                 ;;
             "2")
                 echo "📝 Enter the new storage path (e.g., openvino/mnist/):"
-                read -p "New path: " new_path
+                read -p " --> New path: " new_path
                 if [[ -n "$new_path" ]]; then
                     final_path="$new_path"
                     storage_field_to_update="path"
-                    echo "✅ Updated path to: $final_path"
+                    echo "  ✅ Updated path to: $final_path"
                 else
-                    echo "⚠️  Empty path provided, keeping current configuration"
+                    echo "  ⚠️  Empty path provided, keeping current configuration"
                 fi
                 ;;
             "3")
