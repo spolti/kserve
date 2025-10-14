@@ -64,6 +64,7 @@ parse_arguments() {
     DRY_RUN_DIR=""
     PAGE_SIZE=10
     USE_ODH=false
+    PRESERVE_NAMESPACE=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -89,6 +90,10 @@ parse_arguments() {
                 ;;
             --odh)
                 USE_ODH=true
+                shift 1
+                ;;
+            --preserve-namespace)
+                PRESERVE_NAMESPACE=true
                 shift 1
                 ;;
             --page-size)
@@ -119,15 +124,55 @@ parse_arguments() {
         exit 1
     fi
 
-    if [[ -z "$TARGET_NS" ]]; then
-        echo -e "${ERROR_SYMBOL} Error: --target-ns parameter is required"
-        show_help
-        exit 1
-    fi
+    # Handle preserve namespace mode
+    if [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
+        # When preserving namespace, TARGET_NS = FROM_NS
+        TARGET_NS="$FROM_NS"
 
-    if [[ "$FROM_NS" == "$TARGET_NS" ]]; then
-        echo -e "${ERROR_SYMBOL} Error: --from-ns and --target-ns cannot be the same"
-        exit 1
+        # Show destructive warning
+        echo ""
+        echo "⚠️  ⚠️  ⚠️ DESTRUCTIVE OPERATION WARNING ⚠️  ⚠️  ⚠️"
+        echo "================================================="
+        echo ""
+        echo "🚨 You have enabled --preserve-namespace mode!"
+        echo ""
+        echo "🔥 This will perform the following DESTRUCTIVE actions:"
+        echo "   • Delete existing ModelMesh InferenceServices in '$FROM_NS'"
+        echo "   • Remove modelmesh-enabled=true label from namespace"
+        echo "   • Replace with KServe Raw deployment resources"
+        echo ""
+        echo "💥 If the migration fails, you will need to restore from backup!"
+        echo ""
+        echo "📋 Before proceeding, ensure you have:"
+        echo "   ✓ Tested this migration in a non-production environment"
+        echo "   ✓ Created backups of your InferenceServices"
+        echo "   ✓ Verified you can restore from backup if needed"
+        echo ""
+        echo "⏰ The script will generate backups, but restoration is manual!"
+        echo "  ---> 🚨 The authentication token will be recreated, the consumer will need to be updated!"
+        echo ""
+        read -p "🤔 Do you understand the risks and want to continue? (type 'yes' to proceed): " confirm
+
+        if [[ "$confirm" != "yes" ]]; then
+            echo "👋 Migration cancelled for safety. Use standard mode with --target-ns for safer migration."
+            exit 0
+        fi
+
+        echo ""
+        echo "✅ Proceeding with destructive preserve-namespace migration..."
+        echo ""
+    else
+        # Standard mode - require target namespace
+        if [[ -z "$TARGET_NS" ]]; then
+            echo -e "${ERROR_SYMBOL} Error: --target-ns parameter is required (unless using --preserve-namespace)"
+            show_help
+            exit 1
+        fi
+
+        if [[ "$FROM_NS" == "$TARGET_NS" ]]; then
+            echo -e "${ERROR_SYMBOL} Error: --from-ns and --target-ns cannot be the same (use --preserve-namespace for in-place migration)"
+            exit 1
+        fi
     fi
 }
 
@@ -208,44 +253,112 @@ fi
 # Check OpenShift login status
 check_openshift_login
 
-# Initialize dry-run directory structure
-initialize_dry_run_directory() {
-    if [[ "$DRY_RUN" != "true" ]]; then
+# Initialize backup directory for both dry-run and preserve-namespace modes
+initialize_backup_directory() {
+    # Skip if neither mode is enabled
+    if [[ "$DRY_RUN" != "true" && "$PRESERVE_NAMESPACE" != "true" ]]; then
         return
     fi
 
-    DRY_RUN_DIR="migration-dry-run-$(date +%Y%m%d-%H%M%S)"
-    echo "📁 Initializing dry-run directory: $DRY_RUN_DIR"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        BACKUP_DIR="migration-dry-run-$(date +%Y%m%d-%H%M%S)"
+        echo "📁 Initializing dry-run directory: $BACKUP_DIR"
+    elif [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
+        BACKUP_DIR="preserve-namespace-backup-$(date +%Y%m%d-%H%M%S)"
+        echo "📁 Initializing preserve-namespace backup directory: $BACKUP_DIR"
+    fi
 
-    mkdir -p "$DRY_RUN_DIR"/{original-resources,new-resources}/{namespace,servingruntime,inferenceservice,secret,role,rolebinding,serviceaccount}
+    mkdir -p "$BACKUP_DIR"/{original-resources,new-resources}/{namespace,servingruntime,inferenceservice,secret,role,rolebinding,serviceaccount}
 
-    echo -e "${SUCCESS_SYMBOL} Created dry-run directory structure: $DRY_RUN_DIR"
+    if [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
+        # Create additional rollback-scripts directory for preserve-namespace mode
+        mkdir -p "$BACKUP_DIR/rollback-scripts"
+
+        # Create rollback instructions file
+        cat > "$BACKUP_DIR/ROLLBACK_INSTRUCTIONS.md" << 'EOF'
+# Preserve-Namespace Migration Rollback Instructions
+
+## Overview
+This directory contains backups of all original ModelMesh resources that were replaced during the preserve-namespace migration.
+
+## Rollback Process
+If the migration failed and you need to restore the original ModelMesh configuration:
+
+1. **Delete KServe Raw resources** (if any were created):
+   ```bash
+   # Delete new InferenceServices
+   find new-resources/inferenceservice -name "*.yaml" -exec basename {} .yaml \; | xargs -I {} oc delete inferenceservice {} -n <namespace> --ignore-not-found
+
+   # Delete new ServingRuntimes
+   find new-resources/servingruntime -name "*.yaml" -exec basename {} .yaml \; | xargs -I {} oc delete servingruntime {} -n <namespace> --ignore-not-found
+
+   # Delete new authentication resources
+   find new-resources/serviceaccount -name "*.yaml" -exec basename {} .yaml \; | xargs -I {} oc delete serviceaccount {} -n <namespace> --ignore-not-found
+   find new-resources/role -name "*.yaml" -exec basename {} .yaml \; | xargs -I {} oc delete role {} -n <namespace> --ignore-not-found
+   find new-resources/rolebinding -name "*.yaml" -exec basename {} .yaml \; | xargs -I {} oc delete rolebinding {} -n <namespace> --ignore-not-found
+   ```
+
+2. **Restore ModelMesh namespace label**:
+   ```bash
+   oc label namespace <namespace> modelmesh-enabled=true --overwrite
+   ```
+
+3. **Restore original InferenceServices**:
+   ```bash
+   find original-resources/inferenceservice -name "*.yaml" -exec oc apply -f {} \;
+   ```
+
+4. **Restore original secrets** (if modified):
+   ```bash
+   find original-resources/secret -name "*.yaml" -exec oc apply -f {} \;
+   ```
+
+## Verification
+After rollback, verify ModelMesh is working:
+```bash
+oc get inferenceservice -n <namespace>
+oc get pods -n <namespace> | grep modelmesh
+```
+
+EOF
+
+        echo "📋 Created rollback instructions: $BACKUP_DIR/ROLLBACK_INSTRUCTIONS.md"
+    fi
+
+    echo -e "${SUCCESS_SYMBOL} Created backup directory structure: $BACKUP_DIR"
     echo ""
 }
 
-# Save YAML resource to file in dry-run mode
-save_dry_run_resource() {
+# Save YAML resource to backup directory (for both dry-run and preserve-namespace modes)
+save_backup_resource() {
     local resource_type="$1"
     local resource_name="$2"
     local resource_yaml="$3"
     local category="$4"  # "original-resources" or "new-resources"
 
-    if [[ "$DRY_RUN" != "true" ]]; then
+    # Skip if neither mode is enabled
+    if [[ "$DRY_RUN" != "true" && "$PRESERVE_NAMESPACE" != "true" ]]; then
         return
     fi
 
-    local filename="${DRY_RUN_DIR}/${category}/${resource_type}/${resource_name}.yaml"
+    local filename="${BACKUP_DIR}/${category}/${resource_type}/${resource_name}.yaml"
     echo "$resource_yaml" > "$filename"
-    echo "💾 Saved $resource_type '$resource_name' to: $filename"
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "💾 Saved $resource_type '$resource_name' to: $filename"
+    elif [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
+        echo "💾 [BACKUP] Saved $resource_type '$resource_name' to: $filename"
+    fi
 }
 
-# Save original ModelMesh resource for review
+# Save original ModelMesh resource for review (works with both dry-run and preserve-namespace modes)
 save_original_resource() {
     local resource_type="$1"
     local resource_name="$2"
     local namespace="$3"
 
-    if [[ "$DRY_RUN" != "true" ]]; then
+    # Skip if neither dry-run nor preserve-namespace mode is enabled
+    if [[ "$DRY_RUN" != "true" && "$PRESERVE_NAMESPACE" != "true" ]]; then
         return
     fi
 
@@ -253,21 +366,24 @@ save_original_resource() {
     local resource_yaml=$(oc get "$resource_type" "$resource_name" -n "$namespace" -o yaml 2>/dev/null)
 
     if [[ $? -eq 0 ]]; then
-        save_dry_run_resource "$resource_type" "${resource_name}-original" "$resource_yaml" "original-resources"
+        # Save to backup directory using unified function
+        save_backup_resource "$resource_type" "${resource_name}-original" "$resource_yaml" "original-resources"
     else
         echo "⚠️  Warning: Could not retrieve original $resource_type '$resource_name' from '$namespace'"
     fi
 }
 
-# Apply resource or save to file in dry-run mode
+# Apply resource or save to file in dry-run/preserve-namespace mode
 apply_or_save_resource() {
     local resource_type="$1"
     local resource_name="$2"
     local resource_yaml="$3"
     local target_namespace="$4"
 
+    # Save to backup directory using unified function (for both dry-run and preserve-namespace modes)
+    save_backup_resource "$resource_type" "$resource_name" "$resource_yaml" "new-resources"
+
     if [[ "$DRY_RUN" == "true" ]]; then
-        save_dry_run_resource "$resource_type" "$resource_name" "$resource_yaml" "new-resources"
         echo -e "${SUCCESS_SYMBOL} [DRY-RUN] Would create $resource_type '$resource_name' in namespace '$target_namespace'"
         return 0
     else
@@ -1745,8 +1861,8 @@ echo ""
 
 # Migration logic here
 
-# Initialize dry-run directory if needed
-initialize_dry_run_directory
+# Initialize backup directory if needed (for dry-run or preserve-namespace)
+initialize_backup_directory
 
 # Verify ModelMesh configuration
 verify_modelmesh_namespace

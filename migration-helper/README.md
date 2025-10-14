@@ -10,6 +10,8 @@ A bash script that migrates InferenceServices from ModelMesh serving to KServe R
 - **Creates resources**: Generates ServingRuntimes, ServiceAccounts, Roles, and RoleBindings
 - **Pagination support**: Interactive navigation for namespaces with hundreds of models
 - **Dry-run mode**: Preview changes without applying them
+- **Preserve-namespace mode**: In-place migration within the same namespace (destructive)
+- **Manual migration**: Generate resources and apply them manually for full control
 
 ## Requirements
 
@@ -21,8 +23,14 @@ A bash script that migrates InferenceServices from ModelMesh serving to KServe R
 
 ## Usage
 
+### Standard Migration (to different namespace)
 ```bash
 ./modelmesh-to-raw.sh --from-ns <source-namespace> --target-ns <target-namespace> [OPTIONS]
+```
+
+### Preserve-Namespace Migration (in-place, destructive)
+```bash
+./modelmesh-to-raw.sh --from-ns <source-namespace> --preserve-namespace [OPTIONS]
 ```
 
 ### Parameters
@@ -30,12 +38,16 @@ A bash script that migrates InferenceServices from ModelMesh serving to KServe R
 | Parameter | Description | Required |
 |-----------|-------------|----------|
 | `--from-ns` | Source namespace containing ModelMesh InferenceServices | ✅ |
-| `--target-ns` | Target namespace for KServe Raw deployment | ✅ |
+| `--target-ns` | Target namespace for KServe Raw deployment | ✅* |
+| `--preserve-namespace` | **⚠️ DESTRUCTIVE**: Migrate in-place within the same namespace | ❌ |
 | `--ignore-existing-ns` | Skip check if target namespace already exists | ❌ |
 | `--debug` | Show complete processed resources and wait for confirmation | ❌ |
 | `--dry-run` | Save all YAML resources to local directory without applying | ❌ |
+| `--odh` | Use OpenDataHub template namespace (opendatahub) instead of RHOAI | ❌ |
 | `--page-size` | Number of InferenceServices to display per page (default: 10) | ❌ |
 | `-h, --help` | Show help message | ❌ |
+
+**\* `--target-ns` is not required when using `--preserve-namespace`**
 
 ## Examples
 
@@ -58,6 +70,75 @@ A bash script that migrates InferenceServices from ModelMesh serving to KServe R
 ```bash
 ./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw --ignore-existing-ns --debug
 ```
+
+### Preserve-Namespace Migration (Destructive, In-Place)
+```bash
+# ⚠️ WARNING: This is destructive and will replace ModelMesh resources with KServe Raw resources
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace
+```
+
+### Preserve-Namespace with Debug Mode
+```bash
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace --debug
+```
+
+### OpenDataHub Environment
+```bash
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw --odh
+```
+
+## Manual Migration Guide
+
+For complete control over the migration process, you can use dry-run mode to generate all resources and apply them manually:
+
+### Step 1: Generate Resources
+```bash
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw --dry-run
+```
+
+This creates a directory like `migration-dry-run-20241014-143022/` with:
+- `original-resources/`: Original ModelMesh resources (for backup/comparison)
+- `new-resources/`: New KServe Raw resources to apply
+
+### Step 2: Review Generated Resources
+```bash
+# Check the directory structure
+ls -la migration-dry-run-*/
+
+# Review specific resources
+cat migration-dry-run-*/new-resources/inferenceservice/my-model.yaml
+cat migration-dry-run-*/new-resources/servingruntime/my-model.yaml
+```
+
+### Step 3: Apply Resources Manually
+```bash
+# Apply all new resources at once
+find migration-dry-run-*/new-resources -name '*.yaml' -exec oc apply -f {} \;
+
+# Or apply by category for better control
+oc apply -f migration-dry-run-*/new-resources/namespace/
+oc apply -f migration-dry-run-*/new-resources/servingruntime/
+oc apply -f migration-dry-run-*/new-resources/secret/
+oc apply -f migration-dry-run-*/new-resources/serviceaccount/
+oc apply -f migration-dry-run-*/new-resources/role/
+oc apply -f migration-dry-run-*/new-resources/rolebinding/
+oc apply -f migration-dry-run-*/new-resources/inferenceservice/
+```
+
+### Step 4: Verify Migration
+```bash
+# Check all resources are created
+oc get inferenceservice -n kserve-raw
+oc get servingruntime -n kserve-raw
+oc get secret -n kserve-raw
+```
+
+### Advantages of Manual Migration
+- **Full Control**: Review each resource before applying
+- **Selective Application**: Apply only specific resources
+- **Custom Modifications**: Edit generated YAMLs before applying
+- **Rollback Preparation**: Keep original resources for easy rollback
+- **Debugging**: Easier to troubleshoot issues step by step
 
 ## Example Output
 
@@ -281,6 +362,17 @@ Use `--debug` to see complete YAML resources before applying:
 ./modelmesh-to-raw.sh --from-ns source --target-ns target --debug
 ```
 
+### Preserve-Namespace Mode Issues
+
+**Error: Migration failed during preserve-namespace mode**
+- Check the backup directory for rollback instructions: `preserve-namespace-backup-*/ROLLBACK_INSTRUCTIONS.md`
+- Use the generated rollback scripts to restore original state
+
+**Warning: Authentication tokens recreated**
+- After preserve-namespace migration, authentication tokens are recreated
+- Update consumers to use new tokens
+- Get new token: `oc get secret token-<model-name>-sa -o jsonpath='{.data.token}' | base64 -d`
+
 ## Help
 
 ```bash
@@ -292,10 +384,12 @@ ModelMesh to KServe Raw Deployment Migration Helper
 
 USAGE:
     ./modelmesh-to-raw.sh --from-ns <source-namespace> --target-ns <target-namespace> [OPTIONS]
+    ./modelmesh-to-raw.sh --from-ns <source-namespace> --preserve-namespace [OPTIONS]
 
 PARAMETERS:
     --from-ns <namespace>      Source namespace containing ModelMesh InferenceServices
-    --target-ns <namespace>    Target namespace for KServe Raw deployment
+    --target-ns <namespace>    Target namespace for KServe Raw deployment (not required with --preserve-namespace)
+    --preserve-namespace       ⚠️ DESTRUCTIVE: Migrate in-place within the same namespace
     --ignore-existing-ns       Skip check if target namespace already exists
     --debug                    Show complete processed resources and wait for user confirmation
     --dry-run                  Save all YAML resources to local directory without applying them
@@ -305,19 +399,30 @@ PARAMETERS:
 
 DESCRIPTION:
     This script migrates InferenceServices from ModelMesh to KServe Raw deployment.
-    It will copy models from the source namespace to the target namespace and
-    convert them to use KServe Raw deployment method.
+
+    Standard mode: Copies models from the source namespace to a target namespace.
+    Preserve-namespace mode: Migrates in-place within the same namespace (destructive).
 
     For namespaces with many InferenceServices, use --page-size to control pagination.
 
 EXAMPLES:
+    # Standard migration to different namespace
     ./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw
-    ./modelmesh-to-raw.sh --from-ns my-models --target-ns my-models-raw --page-size 5
-    ./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw --ignore-existing-ns --page-size 20
-    ./modelmesh-to-raw.sh --from-ns large-ns --target-ns kserve-raw --dry-run --page-size 50
+
+    # Preserve-namespace migration (destructive, in-place)
+    ./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace
+
+    # Dry-run mode for manual migration
+    ./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw --dry-run
+
+    # With pagination and debugging
+    ./modelmesh-to-raw.sh --from-ns large-ns --target-ns kserve-raw --page-size 20 --debug
+
+    # OpenDataHub environment
+    ./modelmesh-to-raw.sh --from-ns modelmesh-serving --target-ns kserve-raw --odh
 
 REQUIREMENTS:
     - oc (OpenShift CLI)
     - yq (YAML processor)
-    - Access to both source and target namespaces
+    - Access to both source and target namespaces (or source namespace for --preserve-namespace)
 ```
