@@ -61,7 +61,6 @@ parse_arguments() {
     IGNORE_EXISTING_NS=false
     DEBUG_MODE=false
     DRY_RUN=false
-    DRY_RUN_DIR=""
     PAGE_SIZE=10
     USE_ODH=false
     PRESERVE_NAMESPACE=false
@@ -979,7 +978,7 @@ create_serving_runtimes() {
 
             # Check if the runtime name is exactly ovms
             if [[ "$original_runtime" == "ovms" ]]; then
-                echo "  ${SUCCESS_SYMBOL} Detected OpenVINO Model Server runtime, using kserve-ovms template"
+                echo -e "  ${SUCCESS_SYMBOL} Detected OpenVINO Model Server runtime, using kserve-ovms template"
                 runtime_templates+=("kserve-ovms")
                 runtime_names+=("kserve-ovms")
             else
@@ -1252,24 +1251,29 @@ clone_storage_secrets() {
 clone_user_secret() {
     local secret_name="$1"
 
-    echo "  🔍 Checking if secret '$secret_name' already exists in target namespace '$TARGET_NS'..."
+    # In dry-run mode, skip target namespace checks and just process the secret
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  💾 [DRY-RUN] Would check and clone secret '$secret_name' to target namespace '$TARGET_NS'..."
+    else
+        echo "  🔍 Checking if secret '$secret_name' already exists in target namespace '$TARGET_NS'..."
 
-    # Check if secret already exists in target namespace
-    if oc get secret "$secret_name" -n "$TARGET_NS" &> /dev/null; then
-        echo "  ℹ️  Secret '$secret_name' already exists in target namespace '$TARGET_NS'"
+        # Check if secret already exists in target namespace
+        if oc get secret "$secret_name" -n "$TARGET_NS" &> /dev/null; then
+            echo "  ℹ️  Secret '$secret_name' already exists in target namespace '$TARGET_NS'"
 
-        # Also check if storage-config exists - if not, force apply
-        if oc get secret "storage-config" -n "$TARGET_NS" &> /dev/null; then
-            echo "  🤔 This is common when migrating multiple models that share storage configuration."
-            echo "  ✅ Skipping creation and continuing with existing secret..."
-            return 0
-        else
-            echo "  ⚠️  However, 'storage-config' secret does not exist in target namespace"
-            echo "  🔄 Forcing recreation to ensure proper storage configuration..."
+            # Also check if storage-config exists - if not, force apply
+            if oc get secret "storage-config" -n "$TARGET_NS" &> /dev/null; then
+                echo "  🤔 This is common when migrating multiple models that share storage configuration."
+                echo "  ✅ Skipping creation and continuing with existing secret..."
+                return 0
+            else
+                echo "  ⚠️  However, 'storage-config' secret does not exist in target namespace"
+                echo "  🔄 Forcing recreation to ensure proper storage configuration..."
+            fi
         fi
-    fi
 
-    echo "  🔄 Secret '$secret_name' not found in target namespace, proceeding with cloning..."
+        echo "  🔄 Secret '$secret_name' not found in target namespace, proceeding with cloning..."
+    fi
 
     local secret_yaml=$(oc get secret "$secret_name" -n "$FROM_NS" -o yaml 2>&1)
     if [[ $? -ne 0 ]]; then
@@ -1453,7 +1457,7 @@ roleRef:
             if [[ ${#secret_array[@]} -eq 1 ]]; then
                 # Only one secret found, use it automatically
                 local selected_secret="${secret_array[0]}"
-                echo "${SUCCESS_SYMBOL} Automatically selecting the only available secret: $selected_secret"
+                echo -e "${SUCCESS_SYMBOL} Automatically selecting the only available secret: $selected_secret"
             else
                 # Multiple secrets found, ask user to select
                 echo "🤔 Multiple service account token secrets found. Please select one:"
@@ -1481,7 +1485,7 @@ roleRef:
                 ERRORS+=("Failed to get secret '$selected_secret' from '$FROM_NS': $secret_yaml")
                 echo -e "${ERROR_SYMBOL} Failed to get secret '$selected_secret' from source namespace"
             else
-                echo "  ${SUCCESS_SYMBOL} Successfully retrieved secret '$selected_secret' from source namespace"
+                echo -e "  ${SUCCESS_SYMBOL} Successfully retrieved secret '$selected_secret' from source namespace"
 
                 # Create a new service account token for the target namespace
                 echo "🔄 Creating new service account token for target namespace..."
@@ -1516,7 +1520,7 @@ EOF
                     ERRORS+=("Failed to transform secret YAML: $transformed_secret")
                     return
                 fi
-                echo "${SUCCESS_SYMBOL} Successfully transformed secret YAML"
+                echo -e "${SUCCESS_SYMBOL} Successfully transformed secret YAML"
                 echo "🔄 Applying transformed secret to target namespace..."
 
                 echo "$transformed_secret" > /tmp/secret.yaml
@@ -1525,49 +1529,56 @@ EOF
 
                 # Apply secret with persistence checking
                 local secret_name="token-$isvc_name-sa"
-                local max_attempts=5
-                local attempt=1
-                local secret_persisted=false
 
-                while [[ $attempt -le $max_attempts ]]; do
-                    echo "🔄 Attempt $attempt/$max_attempts: Applying secret '$secret_name'..."
-
-                    local apply_output=$(echo "$transformed_secret" | oc apply -n "$TARGET_NS" -f - 2>&1)
-                    local apply_exit_code=$?
-                    if [[ "$DEBUG_MODE" == "true" ]]; then
-                        echo "🔍 Debug: Apply exit code: $apply_exit_code | output: $apply_output"
-                    fi
-
-                    if [[ $apply_exit_code -eq 0 ]]; then
-                        echo "${SUCCESS_SYMBOL} Secret applied successfully, checking persistence..."
-                        # Wait a moment for any automatic deletions to occur
-                        sleep 3
-
-                        # Check if secret still exists
-                        if oc get secret "$secret_name" -n "$TARGET_NS" &> /dev/null; then
-                            echo -e "${SUCCESS_SYMBOL} Secret '$secret_name' persisted successfully"
-                            secret_persisted=true
-                            break
-                        else
-                            echo "⚠️  Secret '$secret_name' was deleted after creation, retrying..."
-                            attempt=$((attempt+1))
-                        fi
-                    else
-                        echo -e "${ERROR_SYMBOL} Failed to apply secret (attempt $attempt/$max_attempts): $LAST_APPLY_OUTPUT"
-                        attempt=$((attempt+1))
-
-                        if [[ $attempt -le $max_attempts ]]; then
-                            echo "⏳ Waiting 5 seconds before retry..."
-                            sleep 5
-                        fi
-                    fi
-                done
-
-                if [[ $secret_persisted == true ]]; then
-                    echo -e "${SUCCESS_SYMBOL} Successfully copied and persisted secret '$selected_secret' to namespace '$TARGET_NS' as '$secret_name'"
+                if [[ "$DRY_RUN" == "true" ]]; then
+                    echo -e "${SUCCESS_SYMBOL} [DRY-RUN] Would create service account token secret '$secret_name' in namespace '$TARGET_NS'"
+                    # Save the secret for dry-run review
+                    save_backup_resource "secret" "$secret_name" "$transformed_secret" "new-resources"
                 else
-                    echo -e "${ERROR_SYMBOL} Failed to create persistent secret after $max_attempts attempts"
-                    ERRORS+=("Failed to create persistent secret '$secret_name' in namespace '$TARGET_NS' after $max_attempts attempts")
+                    local max_attempts=5
+                    local attempt=1
+                    local secret_persisted=false
+
+                    while [[ $attempt -le $max_attempts ]]; do
+                        echo "🔄 Attempt $attempt/$max_attempts: Applying secret '$secret_name'..."
+
+                        local apply_output=$(echo "$transformed_secret" | oc apply -n "$TARGET_NS" -f - 2>&1)
+                        local apply_exit_code=$?
+                        if [[ "$DEBUG_MODE" == "true" ]]; then
+                            echo "🔍 Debug: Apply exit code: $apply_exit_code | output: $apply_output"
+                        fi
+
+                        if [[ $apply_exit_code -eq 0 ]]; then
+                            echo -e "${SUCCESS_SYMBOL} Secret applied successfully, checking persistence..."
+                            # Wait a moment for any automatic deletions to occur
+                            sleep 3
+
+                            # Check if secret still exists
+                            if oc get secret "$secret_name" -n "$TARGET_NS" &> /dev/null; then
+                                echo -e "${SUCCESS_SYMBOL} Secret '$secret_name' persisted successfully"
+                                secret_persisted=true
+                                break
+                            else
+                                echo "⚠️  Secret '$secret_name' was deleted after creation, retrying..."
+                                attempt=$((attempt+1))
+                            fi
+                        else
+                            echo -e "${ERROR_SYMBOL} Failed to apply secret (attempt $attempt/$max_attempts): $apply_output"
+                            attempt=$((attempt+1))
+
+                            if [[ $attempt -le $max_attempts ]]; then
+                                echo "⏳ Waiting 5 seconds before retry..."
+                                sleep 5
+                            fi
+                        fi
+                    done
+
+                    if [[ $secret_persisted == true ]]; then
+                        echo -e "${SUCCESS_SYMBOL} Successfully copied and persisted secret '$selected_secret' to namespace '$TARGET_NS' as '$secret_name'"
+                    else
+                        echo -e "${ERROR_SYMBOL} Failed to create persistent secret after $max_attempts attempts"
+                        ERRORS+=("Failed to create persistent secret '$secret_name' in namespace '$TARGET_NS' after $max_attempts attempts")
+                    fi
                 fi
             fi
         fi
@@ -1891,38 +1902,60 @@ generate_dry_run_summary() {
     echo "📋 DRY-RUN SUMMARY"
     echo "=================="
     echo ""
-    echo "All YAML resources have been saved to: $DRY_RUN_DIR"
+    echo "All YAML resources have been saved to: $BACKUP_DIR"
     echo ""
 
     # Count files in each category
-    local original_count=$(find "$DRY_RUN_DIR/original-resources" -name "*.yaml" 2>/dev/null | wc -l)
-    local new_count=$(find "$DRY_RUN_DIR/new-resources" -name "*.yaml" 2>/dev/null | wc -l)
+    local original_count
+    local new_count
+    original_count=$(find "$BACKUP_DIR/original-resources" -name "*.yaml" 2>/dev/null | wc -l | tr -d ' ')
+    new_count=$(find "$BACKUP_DIR/new-resources" -name "*.yaml" 2>/dev/null | wc -l | tr -d ' ')
 
     echo "📊 Resources saved:"
-    echo "  • Original ModelMesh resources: $original_count files"
-    echo "  • New KServe Raw resources: $new_count files"
+    printf "  • %-30s %s files\n" "Original ModelMesh resources:" "$original_count"
+    printf "  • %-30s %s files\n" "New KServe Raw resources:" "$new_count"
     echo ""
 
     echo "📂 Directory structure:"
-    echo "  $DRY_RUN_DIR/"
-    echo "  ├── original-resources/     (ModelMesh resources for comparison)"
-    echo "  │   ├── inferenceservice/"
-    echo "  │   ├── servingruntime/"
-    echo "  │   └── secret/"
-    echo "  └── new-resources/          (KServe Raw resources to apply)"
-    echo "      ├── inferenceservice/"
-    echo "      ├── servingruntime/"
-    echo "      ├── secret/"
-    echo "      ├── serviceaccount/"
-    echo "      ├── role/"
-    echo "      └── rolebinding/"
+
+    # Use tree command if available, otherwise fall back to simple ls-based display
+    if command -v tree &> /dev/null; then
+        # Show directory structure with files
+        tree "$BACKUP_DIR" | sed 's/^/  /' || {
+            # Fallback if tree command fails
+            echo "  $BACKUP_DIR/"
+            find "$BACKUP_DIR" -name "*.yaml" | head -10 | sed 's/^/    /'
+            local total_files
+            total_files=$(find "$BACKUP_DIR" -name "*.yaml" | wc -l | tr -d ' ')
+            if [[ $total_files -gt 10 ]]; then
+                echo "    ... and $((total_files - 10)) more files"
+            fi
+        }
+    else
+        # Fallback for systems without tree command
+        echo "  $BACKUP_DIR/"
+        echo "  ├── original-resources/     (ModelMesh resources for comparison)"
+        echo "  └── new-resources/          (KServe Raw resources to apply)"
+        echo ""
+        echo "📊 File summary:"
+        find "$BACKUP_DIR" -name "*.yaml" -type f | head -5 | while read -r file; do
+            echo "    $(basename "$file")"
+        done
+        local total_files=$(find "$BACKUP_DIR" -name "*.yaml" | wc -l)
+        if [[ $total_files -gt 5 ]]; then
+            echo "    ... and $((total_files - 5)) more files"
+        fi
+        echo ""
+        echo "💡 Install 'tree' command for better directory visualization"
+    fi
+
     echo ""
 
     echo "💡 Next steps:"
-    echo "  1. Review the generated YAML files in $DRY_RUN_DIR"
+    echo "  1. Review the generated YAML files in $BACKUP_DIR"
     echo "  2. Compare original vs new resources to understand the migration changes"
     echo "  3. When ready, apply the resources manually:"
-    echo "     find $DRY_RUN_DIR/new-resources -name '*.yaml' -exec oc apply -f {} \\;"
+    echo "     find $BACKUP_DIR/new-resources -name '*.yaml' -exec oc apply -f {} \\;"
     echo "  4. Or re-run this script without --dry-run to perform the actual migration"
     echo ""
 }
