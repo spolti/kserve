@@ -8,9 +8,10 @@ A bash script that migrates InferenceServices from ModelMesh serving to KServe R
 - **Preserves configuration**: Maintains route exposure, authentication, and storage settings
 - **Handles secrets**: Clones and manages storage and authentication secrets
 - **Creates resources**: Generates ServingRuntimes, ServiceAccounts, Roles, and RoleBindings
+- **Advanced authentication handling**: Properly backs up and recreates authentication resources during preserve-namespace migrations
 - **Pagination support**: Interactive navigation for namespaces with hundreds of models
 - **Dry-run mode**: Preview changes without applying them
-- **Preserve-namespace mode**: In-place migration within the same namespace (destructive)
+- **Preserve-namespace mode**: In-place migration within the same namespace (destructive) with enhanced backup and rollback capabilities
 - **Manual migration**: Generate resources and apply them manually for full control
 
 ## Requirements
@@ -384,6 +385,18 @@ Use `--debug` to see complete YAML resources before applying:
 - Update consumers to use new tokens
 - Get new token: `oc get secret token-<model-name>-sa -o jsonpath='{.data.token}' | base64 -d`
 
+**Error: Authentication resources missing after preserve-namespace migration**
+- The script now automatically backs up authentication resources before any changes
+- Check backup directory: `preserve-namespace-backup-*/original-resources/`
+- If resources are missing, use the rollback instructions to restore original state
+- This issue should not occur with the enhanced authentication handling
+
+**Error: Old ServingRuntime still exists after migration**
+- The script now deletes old ServingRuntimes after all new resources are stable
+- Check if migration completed successfully: `oc get servingruntime -n <namespace>`
+- Old ServingRuntimes are deleted individually per model to prevent authentication resource loss
+- Use debug mode to monitor the deletion process: `--debug`
+
 ## Preserve-Namespace Mode Guide
 
 ### ⚠️ **IMPORTANT: Destructive Operation Warning**
@@ -461,12 +474,19 @@ preserve-namespace-backup-20241015-143022/
 └── ROLLBACK_INSTRUCTIONS.md   # Detailed rollback procedures
 ```
 
-#### Phase 3: Destructive Migration
-1. **Backup original resources**: All existing resources are saved to the backup directory
-2. **Delete ModelMesh resources**: Original InferenceServices and associated resources are removed
-3. **Update namespace labels**: `modelmesh-enabled=true` is changed to `modelmesh-enabled=false`
-4. **Create KServe Raw resources**: New ServingRuntimes, InferenceServices, and authentication resources are created
-5. **Migrate secrets**: Storage and authentication secrets are transformed for KServe Raw compatibility
+#### Phase 3: Enhanced Destructive Migration Process
+The migration follows a carefully orchestrated sequence to prevent resource loss:
+
+1. **Comprehensive backup creation**: All ModelMesh resources are backed up before any changes
+2. **Update namespace labels**: `modelmesh-enabled=true` is changed to `modelmesh-enabled=false`
+3. **Individual resource migration** (per InferenceService):
+   - **Authentication resource backup**: ServiceAccounts, Roles, RoleBindings, and service account tokens are backed up *before* any changes
+   - **Create new ServingRuntime**: KServe Raw ServingRuntime is created first
+   - **Create new InferenceService**: Transformed for Raw deployment with preserved settings
+   - **Create new authentication resources**: ServiceAccounts, Roles, RoleBindings, and tokens for KServe Raw
+   - **Delete old ServingRuntime**: Original ModelMesh ServingRuntime is deleted *only after* all new resources are stable
+4. **Storage secret migration**: Storage secrets are cloned and transformed for KServe compatibility
+5. **Verification**: Each resource is verified after creation before proceeding
 
 ### Safety Features and Backup Strategy
 

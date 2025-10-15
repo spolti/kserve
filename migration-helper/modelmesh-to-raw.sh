@@ -26,6 +26,8 @@ TEMPLATE_DISPLAY_ARRAY=()
 LAST_APPLY_OUTPUT=""
 SELECTED_SECRET_FOR_ISVC=""
 
+# Note: Resources are now deleted individually during script execution when using preserve-namespace mode
+
 
 # Check if required binaries are installed
 check_dependencies() {
@@ -321,7 +323,7 @@ EOF
         echo "  📋 Created rollback instructions: $BACKUP_DIR/ROLLBACK_INSTRUCTIONS.md"
     fi
 
-    echo "  ${SUCCESS_SYMBOL} Created backup directory structure: $BACKUP_DIR"
+    echo -e "  ${SUCCESS_SYMBOL} Created backup directory structure: $BACKUP_DIR"
     echo ""
 }
 
@@ -359,13 +361,34 @@ save_original_resource() {
     fi
 
     echo "📋 Saving original $resource_type '$resource_name' from namespace '$namespace'..."
-    local resource_yaml=$(oc get "$resource_type" "$resource_name" -n "$namespace" -o yaml 2>/dev/null)
 
-    if [[ $? -eq 0 ]]; then
-        # Save to backup directory using unified function
-        save_backup_resource "$resource_type" "${resource_name}-original" "$resource_yaml" "original-resources"
+    # First check if the resource exists
+    if ! oc get "$resource_type" "$resource_name" -n "$namespace" &> /dev/null; then
+        echo "  ⚠️  Warning: Resource $resource_type '$resource_name' not found in namespace '$namespace'"
+        return
+    fi
+
+    # Get the resource and capture both output and error
+    local get_output
+    local get_error
+    get_output=$(oc get "$resource_type" "$resource_name" -n "$namespace" -o yaml 2>&1)
+    local get_exit_code=$?
+
+    if [[ $get_exit_code -eq 0 ]]; then
+        # Validate that we got YAML content (should start with apiVersion or kind)
+        if [[ "$get_output" =~ ^(apiVersion:|kind:) ]]; then
+            # Save to backup directory using unified function
+            save_backup_resource "$resource_type" "${resource_name}-original" "$get_output" "original-resources"
+            echo "  💾 [BACKUP] Successfully saved $resource_type '$resource_name')"
+        else
+            echo "  ⚠️  Warning: Retrieved content for $resource_type '$resource_name' doesn't appear to be YAML"
+            echo "  🔍 First 200 chars: ${get_output:0:200}..."
+            # Still save it but with a warning
+            save_backup_resource "$resource_type" "${resource_name}-original" "$get_output" "original-resources"
+        fi
     else
-        echo "⚠️  Warning: Could not retrieve original $resource_type '$resource_name' from '$namespace'"
+        echo "  ⚠️  Warning: Could not retrieve original $resource_type '$resource_name' from '$namespace'"
+        echo "  🔍 Error details: $get_output"
     fi
 }
 
@@ -428,12 +451,18 @@ verify_modelmesh_namespace() {
     fi
 
     if [[ "$modelmesh_enabled" != "true" ]]; then
-        echo -e "${ERROR_SYMBOL} ModelMesh is disabled (modelmesh-enabled=$modelmesh_enabled)"
-        echo "  💡 To enable: oc label namespace $FROM_NS modelmesh-enabled=true"
-        exit 1
+        # In preserve-namespace mode, if ModelMesh is disabled, this might be a previously migrated namespace
+        if [[ "$PRESERVE_NAMESPACE" == "true" && "$modelmesh_enabled" == "false" ]]; then
+            echo -e "${SUCCESS_SYMBOL} Namespace '$FROM_NS' appears to be previously migrated (modelmesh-enabled=false)"
+            echo "  ℹ️  Continuing with preserve-namespace migration on already migrated namespace"
+        else
+            echo -e "${ERROR_SYMBOL} ModelMesh is disabled (modelmesh-enabled=$modelmesh_enabled)"
+            echo "  💡 To enable: oc label namespace $FROM_NS modelmesh-enabled=true"
+            exit 1
+        fi
+    else
+        echo -e "  ${SUCCESS_SYMBOL} ModelMesh enabled in '$FROM_NS'"
     fi
-
-    echo -e "${SUCCESS_SYMBOL} ModelMesh enabled in '$FROM_NS'"
     echo ""
 }
 
@@ -541,7 +570,7 @@ list_and_select_inference_services() {
         exit 1
     fi
 
-    echo -e "${SUCCESS_SYMBOL} Found $isvc_count InferenceService(s) for migration"
+    echo -e "  ${SUCCESS_SYMBOL} Found $isvc_count InferenceService(s) for migration"
     echo ""
 
     # Store names in an array for selection
@@ -945,7 +974,7 @@ create_serving_runtimes() {
 
             # Check if the runtime name is exactly ovms
             if [[ "$original_runtime" == "ovms" ]]; then
-                echo "    ${SUCCESS_SYMBOL} Using kserve-ovms template for OpenVINO"
+                echo -e "    ${SUCCESS_SYMBOL} Using kserve-ovms template for OpenVINO"
                 runtime_templates+=("kserve-ovms")
                 runtime_names+=("kserve-ovms")
             else
@@ -960,13 +989,35 @@ create_serving_runtimes() {
     done
 
     echo ""
-    # Create serving runtimes for each model with their appropriate template
+
+
+    # Process serving runtimes for each model with proper sequence for preserve-namespace mode
     index=0
     for isvc_name in "${SELECTED_ISVCS[@]}"; do
         local template_name="${runtime_templates[$index]}"
         local template_display_name="${runtime_names[$index]}"
 
-        echo "🏗️ Creating serving runtime for '$isvc_name' using template '$template_name'..."
+        echo "🏗️ Processing serving runtime for '$isvc_name' using template '$template_name'..."
+
+        # Step 1: Backup original serving runtime (if preserve-namespace mode)
+        if [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
+            echo "  💾 Backing up original serving runtime..."
+            # Get the runtime name from the InferenceService
+            local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>/dev/null)
+            if [[ $? -eq 0 ]]; then
+                local original_runtime_name=$(echo "$original_isvc" | yq '.spec.predictor.model.runtime // ""')
+                if [[ -n "$original_runtime_name" ]]; then
+                    save_original_resource "servingruntime" "$original_runtime_name" "$FROM_NS"
+                else
+                    echo "    ⚠️  No runtime name found for '$isvc_name', skipping original backup"
+                fi
+            else
+                echo "    ⚠️  Could not retrieve InferenceService '$isvc_name', skipping original backup"
+            fi
+        fi
+
+        # Step 2: Prepare new serving runtime
+        echo "  🔧 Preparing new serving runtime..."
 
         # Get the template from template namespace
         local runtime_template=$(oc get template "$template_name" -n "$TEMPLATE_NAMESPACE" -o yaml 2>/dev/null)
@@ -993,13 +1044,14 @@ create_serving_runtimes() {
             yq '.metadata.labels."opendatahub.io/dashboard" = "true"' | \
             yq '.metadata.annotations."migration.kserve.io/source" = "modelmesh"' )
 
-        # Save original serving runtime for review in dry-run mode
-        save_original_resource "servingruntime" "$runtime_name" "$FROM_NS"
+        # Step 3: Save new serving runtime (for dry-run and preserve-namespace backup)
+        local processed_runtime=$(echo "$modified_runtime" | oc process -f - -o yaml)
+        save_backup_resource "servingruntime" "$isvc_name" "$processed_runtime" "new-resources"
 
-        # Apply the serving runtime to the target namespace
-        local processed_runtime=$(echo "$modified_runtime" | oc process -f -)
+        # Step 4: Deploy new serving runtime (old ServingRuntime deletion moved to after authentication resources are created)
+        echo "  🚀 Deploying new serving runtime..."
         if apply_or_save_resource "servingruntime" "$isvc_name" "$processed_runtime" "$TARGET_NS"; then
-            echo "  ${SUCCESS_SYMBOL} Created serving runtime '$isvc_name'"
+            echo -e "    ${SUCCESS_SYMBOL} Created serving runtime '$isvc_name'"
         else
             ERRORS+=("Failed to create serving runtime '$isvc_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
         fi
@@ -1096,9 +1148,9 @@ clone_storage_secrets() {
         local index=1
         for secret_name in "${secret_array[@]}"; do
             if [[ -n "$prioritized_secret" && "$secret_name" == "$prioritized_secret" ]]; then
-                echo "      [$index] $secret_name (referenced by current model)"
+                echo "    [$index] $secret_name (referenced by current model)"
             else
-                echo "      [$index] $secret_name"
+                echo "    [$index] $secret_name"
             fi
             index=$((index+1))
         done
@@ -1106,16 +1158,16 @@ clone_storage_secrets() {
         if [[ ${#secret_array[@]} -gt 0 ]]; then
             echo ""
             echo -e "🤔 Do you want to clone any of these secrets to the target namespace?"
-            echo "       Enter 'all' to clone all secrets"
-            echo "       Enter specific numbers separated by spaces (e.g., '1 3 5')"
-            echo "       Enter 'none' to skip"
-            echo "       Default: 1"
+            echo "    Enter 'all' to clone all secrets"
+            echo "    Enter specific numbers separated by spaces (e.g., '1 3 5')"
+            echo "    Enter 'none' to skip"
+            echo "    Default: 1"
             read -p "Your selection [1]: " secret_selection
 
             # Set default to first secret if empty input
             if [[ -z "$secret_selection" ]]; then
                 secret_selection="1"
-                echo "${SUCCESS_SYMBOL} Using default selection: 1 (${secret_array[0]})"
+                echo -e "${SUCCESS_SYMBOL} Using default selection: 1 (${secret_array[0]})"
             fi
 
             case "$secret_selection" in
@@ -1209,13 +1261,13 @@ clone_user_secret() {
     else
         # Check if secret already exists in target namespace
         if oc get secret "$secret_name" -n "$TARGET_NS" &> /dev/null; then
-            echo "        ℹ️  Secret '$secret_name' already exists in target namespace '$TARGET_NS'"
+            echo "      ℹ️  Secret '$secret_name' already exists in target namespace '$TARGET_NS'"
 
             # Also check if storage-config exists - if not, force apply
             if oc get secret "storage-config" -n "$TARGET_NS" &> /dev/null; then
                 return 0
             else
-                echo "        ⚠️ 'storage-config' secret does not exist in target namespace. Forcing recreation..."
+                echo "      ⚠️ 'storage-config' secret does not exist in target namespace. Forcing recreation..."
             fi
         fi
     fi
@@ -1303,7 +1355,7 @@ ${owner_ref_yaml}"
     save_original_resource "serviceaccount" "$source_sa_name" "$FROM_NS"
 
     if apply_or_save_resource "serviceaccount" "$target_sa_name" "$sa_yaml" "$TARGET_NS"; then
-        echo "      ${SUCCESS_SYMBOL} Created ServiceAccount '$target_sa_name'"
+        echo -e "    ${SUCCESS_SYMBOL} Created ServiceAccount '$target_sa_name'"
     else
         ERRORS+=("Failed to create ServiceAccount '$target_sa_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
     fi
@@ -1337,7 +1389,7 @@ rules:
     save_original_resource "role" "$source_role_name" "$FROM_NS"
 
     if apply_or_save_resource "role" "$target_role_name" "$role_yaml" "$TARGET_NS"; then
-        echo "      ${SUCCESS_SYMBOL} Created Role '$target_role_name'"
+        echo -e "    ${SUCCESS_SYMBOL} Created Role '$target_role_name'"
     else
         ERRORS+=("Failed to create Role '$target_role_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
     fi
@@ -1369,25 +1421,25 @@ roleRef:
     save_original_resource "rolebinding" "$source_rolebinding_name" "$FROM_NS"
 
     if apply_or_save_resource "rolebinding" "$target_rolebinding_name" "$rolebinding_yaml" "$TARGET_NS"; then
-        echo "      ${SUCCESS_SYMBOL} Created RoleBinding '$target_rolebinding_name'"
+        echo -e "    ${SUCCESS_SYMBOL} Created RoleBinding '$target_rolebinding_name'"
     else
         ERRORS+=("Failed to create RoleBinding '$target_rolebinding_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
     fi
 
     # Find secrets with type kubernetes.io/service-account-token that match the pattern
     # Pattern: <name_provided_by_user>-<original-serving-runtime-name>-sa
-    echo "        🔍 Looking for service account token secrets for original runtime '$original_runtime'..."
+    echo "🔍 Looking for service account token secrets for original runtime '$original_runtime'..."
     local sa_token_secrets=$(oc get secrets -n "$FROM_NS" -o yaml 2>/dev/null | \
         yq '.items[] | select(.type == "kubernetes.io/service-account-token" and (.metadata.name | test(".*-'$original_runtime'-sa$"))) | .metadata.name' 2>/dev/null || echo "")
 
     if [[ -n "$sa_token_secrets" ]]; then
-        echo "        📋 Found service account token secrets for '$isvc_name':"
+        echo "  📋 Found service account token secrets for '$isvc_name':"
 
         local secret_array=()
         while IFS= read -r secret_name; do
             if [[ -n "$secret_name" ]]; then
                 secret_array+=("$secret_name")
-                echo "            • $secret_name"
+                echo "    • $secret_name"
             fi
         done <<< "$sa_token_secrets"
 
@@ -1395,12 +1447,12 @@ roleRef:
             if [[ ${#secret_array[@]} -eq 1 ]]; then
                 # Only one secret found, use it automatically
                 local selected_secret="${secret_array[0]}"
-                echo "            ${SUCCESS_SYMBOL} Automatically selecting the only available secret: $selected_secret"
+                echo -e "    ${SUCCESS_SYMBOL} Automatically selecting the only available secret: $selected_secret"
             else
                 # Multiple secrets found, ask user to select
-                echo "        🤔 Multiple service account token secrets found. Please select one:"
+                echo "    🤔 Multiple service account token secrets found. Please select one:"
                 for i in "${!secret_array[@]}"; do
-                    echo "            [$((i+1))] ${secret_array[$i]}"
+                    echo "      [$((i+1))] ${secret_array[$i]}"
                 done
                 echo ""
                 read -p "Your choice (1-${#secret_array[@]}): " secret_choice
@@ -1412,7 +1464,7 @@ roleRef:
                 fi
 
                 local selected_secret="${secret_array[$((secret_choice-1))]}"
-                echo "            ✅ Selected secret: $selected_secret"
+                echo -e "    ${SUCCESS_SYMBOL} Selected secret: $selected_secret"
             fi
 
             # Copy the selected secret
@@ -1481,7 +1533,7 @@ EOF
 
                             # Check if secret still exists
                             if oc get secret "$secret_name" -n "$TARGET_NS" &> /dev/null; then
-                                echo "      ${SUCCESS_SYMBOL} Secret '$secret_name' persisted successfully"
+                                echo -e "      ${SUCCESS_SYMBOL} Secret '$secret_name' persisted successfully"
                                 secret_persisted=true
                                 break
                             else
@@ -1730,11 +1782,45 @@ process_inference_services() {
             fi
         fi
 
-        # Save original InferenceService for review in dry-run mode
+        # Save original InferenceService for review (both dry-run and preserve-namespace modes)
         save_original_resource "inferenceservice" "$isvc_name" "$FROM_NS"
 
+        # Backup authentication resources BEFORE InferenceService changes (preserve-namespace mode only)
+        if [[ "$PRESERVE_NAMESPACE" == "true" && "$auth_enabled" == "true" ]]; then
+            echo "🔐 Backing up authentication resources before InferenceService changes..."
+
+            # Expected resource names in source namespace based on original runtime
+            local source_sa_name="${original_runtime}-sa"
+            local source_role_name="${original_runtime}-view-role"
+            local source_rolebinding_name="${original_runtime}-view"
+
+            # Backup authentication resources using existing functions
+            save_original_resource "serviceaccount" "$source_sa_name" "$FROM_NS"
+            save_original_resource "role" "$source_role_name" "$FROM_NS"
+            save_original_resource "rolebinding" "$source_rolebinding_name" "$FROM_NS"
+
+            # Backup service account token secrets before they get deleted
+            echo "  🔍 Looking for service account token secrets to backup..."
+            local sa_token_secrets=$(oc get secrets -n "$FROM_NS" -o yaml 2>/dev/null | \
+                yq '.items[] | select(.type == "kubernetes.io/service-account-token" and (.metadata.name | test(".*-'$original_runtime'-sa$"))) | .metadata.name' 2>/dev/null || echo "")
+
+            if [[ -n "$sa_token_secrets" ]]; then
+                echo "  📋 Found service account token secrets to backup:"
+                while IFS= read -r secret_name; do
+                    if [[ -n "$secret_name" ]]; then
+                        echo "    • Backing up: $secret_name"
+                        save_original_resource "secret" "$secret_name" "$FROM_NS"
+                    fi
+                done <<< "$sa_token_secrets"
+            else
+                echo "  ℹ️  No service account token secrets found for runtime '$original_runtime'"
+            fi
+
+            echo "  ${SUCCESS_SYMBOL} Authentication resources backed up"
+        fi
+
         # Apply the transformed InferenceService to the target namespace
-        echo "🚀 Applying transformed InferenceService '$isvc_name'..."
+        echo "🚀 Deploying new InferenceService '$isvc_name'..."
         echo "  💾 Resources: CPU requests: 1, limits: 2 | Memory requests: 4Gi, limits: 8Gi"
         if apply_or_save_resource "inferenceservice" "$isvc_name" "$transformed_isvc" "$TARGET_NS"; then
             echo -e "${SUCCESS_SYMBOL} Created InferenceService '$isvc_name' in namespace '$TARGET_NS'"
@@ -1751,12 +1837,26 @@ process_inference_services() {
             if [[ "$auth_enabled" == "true" ]]; then
                 echo "  🔐 Authentication: Enabled (security.opendatahub.io/enable-auth=true)"
 
-                # Copy authentication resources now that InferenceService exists
+                # Copy authentication resources immediately after InferenceService creation
                 copy_authentication_resources "$isvc_name" "$original_runtime"
             else
                 echo "  🔓 Authentication: Disabled"
             fi
             echo "  💾 Applied resource constraints: 1-2 CPUs, 4-8Gi Memory (Hardware Profile: Small)"
+
+            # Delete old ServingRuntime (only in preserve-namespace mode, after all new resources are created)
+            if [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
+                echo "  🗑️  Deleting old serving runtime now that all new resources are created..."
+                if [[ -n "$original_runtime" ]]; then
+                    if oc delete servingruntime "$original_runtime" -n "$FROM_NS" &> /dev/null; then
+                        echo -e "    ${SUCCESS_SYMBOL} Deleted old serving runtime '$original_runtime'"
+                    else
+                        echo "    ⚠️  Could not delete old serving runtime '$original_runtime' (may not exist or already deleted)"
+                    fi
+                else
+                    echo "    ℹ️  No old serving runtime to delete"
+                fi
+            fi
         else
             ERRORS+=("Failed to create InferenceService '$isvc_name' in namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
         fi
@@ -1806,6 +1906,16 @@ verify_modelmesh_namespace
 # Create and configure target namespace (skip in preserve-namespace mode)
 if [[ "$PRESERVE_NAMESPACE" != "true" ]]; then
     create_target_namespace
+else
+    # In preserve-namespace mode, we still need to update the modelmesh-enabled label
+    echo "🏷️  Updating namespace labels for preserve-namespace mode..."
+    if oc label namespace "$TARGET_NS" modelmesh-enabled="false" --overwrite >/dev/null 2>&1; then
+        echo -e "  ${SUCCESS_SYMBOL} ModelMesh disabled in '$TARGET_NS'"
+    else
+        echo -e "  ${ERROR_SYMBOL} Failed to set modelmesh-enabled=false in '$TARGET_NS'"
+        exit 1
+    fi
+    echo ""
 fi
 
 # List InferenceServices and get user selection
@@ -1818,6 +1928,8 @@ create_serving_runtimes
 
 # Process the models for migration, prepare the InferenceService manifests
 process_inference_services
+
+
 
 # Generate dry-run summary if in dry-run mode
 generate_dry_run_summary() {
