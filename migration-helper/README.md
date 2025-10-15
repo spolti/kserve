@@ -267,32 +267,43 @@ Your selection: n
 📋 DRY-RUN SUMMARY
 ==================
 
-All YAML resources have been saved to: migration-dry-run-20241007-143022
+All YAML resources have been saved to: migration-dry-run-20251014-124606
 
 📊 Resources saved:
-  • Original ModelMesh resources: 9 files
-  • New KServe Raw resources: 15 files
+  • Original ModelMesh resources:  6 files
+  • New KServe Raw resources:      7 files
 
 📂 Directory structure:
-  migration-dry-run-20241007-143022/
-  ├── original-resources/     (ModelMesh resources for comparison)
-  │   ├── inferenceservice/
-  │   ├── servingruntime/
-  │   └── secret/
-  └── new-resources/          (KServe Raw resources to apply)
-      ├── inferenceservice/
-      ├── servingruntime/
-      ├── secret/
-      ├── serviceaccount/
-      ├── role/
-      └── rolebinding/
-
-💡 Next steps:
-  1. Review the generated YAML files in migration-dry-run-20241007-143022
-  2. Compare original vs new resources to understand the migration changes
-  3. When ready, apply the resources manually:
-     find migration-dry-run-20241007-143022/new-resources -name '*.yaml' -exec oc apply -f {} \;
-  4. Or re-run this script without --dry-run to perform the actual migration
+  migration-dry-run-20251014-124606
+  ├── new-resources
+  │   ├── inferenceservice
+  │   │   └── mnist-route.yaml
+  │   ├── namespace
+  │   ├── role
+  │   │   └── mnist-route-view-role.yaml
+  │   ├── rolebinding
+  │   │   └── mnist-route-view.yaml
+  │   ├── secret
+  │   │   ├── localminio.yaml
+  │   │   └── token-mnist-route-sa.yaml
+  │   ├── serviceaccount
+  │   │   └── mnist-route-sa.yaml
+  │   └── servingruntime
+  │       └── mnist-route.yaml
+  └── original-resources
+      ├── inferenceservice
+      │   └── mnist-route-original.yaml
+      ├── namespace
+      ├── role
+      │   └── ovms-mm-auth-view-role-original.yaml
+      ├── rolebinding
+      │   └── ovms-mm-auth-view-original.yaml
+      ├── secret
+      │   └── localminio-original.yaml
+      ├── serviceaccount
+      │   └── ovms-mm-auth-sa-original.yaml
+      └── servingruntime
+          └── ovms-mm-auth-original.yaml
 ```
 
 ## Features
@@ -372,6 +383,313 @@ Use `--debug` to see complete YAML resources before applying:
 - After preserve-namespace migration, authentication tokens are recreated
 - Update consumers to use new tokens
 - Get new token: `oc get secret token-<model-name>-sa -o jsonpath='{.data.token}' | base64 -d`
+
+## Preserve-Namespace Mode Guide
+
+### ⚠️ **IMPORTANT: Destructive Operation Warning**
+
+The `--preserve-namespace` flag performs an **in-place, destructive migration** within the same namespace. This mode completely replaces ModelMesh resources with KServe Raw deployment resources **without the safety of a separate target namespace**.
+
+### When to Use Preserve-Namespace Mode
+
+**Recommended Use Cases:**
+- **Namespace constraints**: When you cannot create additional namespaces due to cluster policies
+- **Resource quotas**: When cluster resource limits prevent creating new namespaces
+- **Network policies**: When existing network configurations are tied to the specific namespace
+- **External integrations**: When external systems reference the specific namespace name
+- **Simplified management**: When you prefer to maintain the same namespace structure
+
+**⚠️ When NOT to Use:**
+- **Production environments** without thorough testing
+- **Shared namespaces** with other critical workloads
+- **Compliance requirements** that mandate separate migration environments
+- **First-time migrations** (use standard mode for initial testing)
+
+### How Preserve-Namespace Mode Works
+
+#### Phase 1: Safety Checks and Warnings
+```bash
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace
+```
+
+The script will display a comprehensive warning:
+
+```
+⚠️  ⚠️  ⚠️ DESTRUCTIVE OPERATION WARNING ⚠️  ⚠️  ⚠️
+=================================================
+
+🚨 You have enabled --preserve-namespace mode!
+
+🔥 This will perform the following DESTRUCTIVE actions:
+   • Delete existing ModelMesh InferenceServices in 'modelmesh-serving'
+   • Remove modelmesh-enabled=true label from namespace
+   • Replace with KServe Raw deployment resources
+
+💥 If the migration fails, you will need to restore from backup!
+
+📋 Before proceeding, ensure you have:
+   ✓ Tested this migration in a non-production environment
+   ✓ Created backups of your InferenceServices
+   ✓ Verified you can restore from backup if needed
+
+⏰ The script will generate backups, but restoration is manual!
+  ---> 🚨 The authentication token will be recreated, the consumer will need to be updated!
+
+🤔 Do you understand the risks and want to continue? (type 'yes' to proceed):
+```
+
+**You must type exactly `yes` to proceed** - any other input will cancel the operation.
+
+#### Phase 2: Backup Creation
+The script automatically creates a timestamped backup directory:
+```
+preserve-namespace-backup-20241015-143022/
+├── original-resources/          # Original ModelMesh resources
+│   ├── inferenceservice/
+│   ├── secret/
+│   ├── serviceaccount/
+│   ├── role/
+│   ├── rolebinding/
+│   └── servingruntime/
+├── new-resources/              # New KServe Raw resources
+│   ├── inferenceservice/
+│   ├── secret/
+│   ├── serviceaccount/
+│   ├── role/
+│   ├── rolebinding/
+│   └── servingruntime/
+└── ROLLBACK_INSTRUCTIONS.md   # Detailed rollback procedures
+```
+
+#### Phase 3: Destructive Migration
+1. **Backup original resources**: All existing resources are saved to the backup directory
+2. **Delete ModelMesh resources**: Original InferenceServices and associated resources are removed
+3. **Update namespace labels**: `modelmesh-enabled=true` is changed to `modelmesh-enabled=false`
+4. **Create KServe Raw resources**: New ServingRuntimes, InferenceServices, and authentication resources are created
+5. **Migrate secrets**: Storage and authentication secrets are transformed for KServe Raw compatibility
+
+### Safety Features and Backup Strategy
+
+#### Automatic Backup Creation
+Every preserve-namespace migration creates comprehensive backups:
+
+```bash
+# Backup directory structure
+preserve-namespace-backup-20241015-143022/
+├── original-resources/
+│   └── [Complete backup of all original ModelMesh resources]
+├── new-resources/
+│   └── [All generated KServe Raw resources for review]
+└── ROLLBACK_INSTRUCTIONS.md
+```
+
+#### Rollback Instructions
+The generated `ROLLBACK_INSTRUCTIONS.md` contains step-by-step procedures to restore the original ModelMesh configuration:
+
+```markdown
+# Preserve-Namespace Migration Rollback Instructions
+
+## Emergency Rollback Process
+1. Delete KServe Raw resources
+2. Restore ModelMesh namespace label
+3. Restore original InferenceServices
+4. Restore original secrets
+5. Verify ModelMesh functionality
+```
+
+### Step-by-Step Migration Process
+
+#### 1. Pre-Migration Preparation
+```bash
+# Verify current state
+oc get inferenceservice -n modelmesh-serving
+oc get servingruntime -n modelmesh-serving
+oc get secrets -n modelmesh-serving
+
+# Optional: Create manual backup
+oc get all,secrets,serviceaccounts,roles,rolebindings -n modelmesh-serving -o yaml > manual-backup.yaml
+```
+
+#### 2. Execute Migration
+```bash
+# Standard preserve-namespace migration
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace
+
+# With debugging (recommended for first-time use)
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace --debug
+
+# With custom pagination
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace --page-size 5
+```
+
+#### 3. Post-Migration Verification
+```bash
+# Verify new KServe Raw resources
+oc get inferenceservice -n modelmesh-serving
+oc get servingruntime -n modelmesh-serving
+oc get pods -n modelmesh-serving
+
+# Check namespace labels
+oc get namespace modelmesh-serving --show-labels
+
+# Verify authentication tokens (if auth was enabled)
+oc get secrets -n modelmesh-serving | grep token-
+
+# Test model endpoints
+curl -k https://your-model-route/v1/models
+```
+
+### Emergency Rollback Procedures
+
+#### Immediate Rollback (if migration fails)
+```bash
+# Navigate to backup directory
+cd preserve-namespace-backup-20241015-143022/
+
+# Follow the automated rollback instructions
+cat ROLLBACK_INSTRUCTIONS.md
+
+# Quick rollback commands
+# 1. Delete KServe Raw resources
+find new-resources/ -name "*.yaml" -exec basename {} .yaml \; | while read resource; do
+  oc delete inferenceservice "$resource" -n modelmesh-serving --ignore-not-found
+  oc delete servingruntime "$resource" -n modelmesh-serving --ignore-not-found
+  oc delete serviceaccount "${resource}-sa" -n modelmesh-serving --ignore-not-found
+  oc delete role "${resource}-view-role" -n modelmesh-serving --ignore-not-found
+  oc delete rolebinding "${resource}-view" -n modelmesh-serving --ignore-not-found
+done
+
+# 2. Restore ModelMesh namespace label
+oc label namespace modelmesh-serving modelmesh-enabled=true --overwrite
+
+# 3. Restore original resources
+find original-resources/inferenceservice -name "*.yaml" -exec oc apply -f {} \;
+find original-resources/secret -name "*.yaml" -exec oc apply -f {} \;
+```
+
+#### Verification After Rollback
+```bash
+# Verify ModelMesh is functional
+oc get inferenceservice -n modelmesh-serving
+oc get pods -n modelmesh-serving | grep modelmesh
+oc logs -l app=modelmesh -n modelmesh-serving
+```
+
+### Common Scenarios and Best Practices
+
+#### Scenario 1: Testing in Development
+```bash
+# Use debug mode for detailed inspection
+./modelmesh-to-raw.sh --from-ns dev-modelmesh --preserve-namespace --debug --page-size 3
+```
+
+#### Scenario 2: Large-Scale Production Migration
+```bash
+# Use dry-run first to review changes
+./modelmesh-to-raw.sh --from-ns prod-modelmesh --preserve-namespace --dry-run
+
+# Review generated resources
+ls -la preserve-namespace-backup-*/
+cat preserve-namespace-backup-*/new-resources/inferenceservice/critical-model.yaml
+
+# Execute actual migration
+./modelmesh-to-raw.sh --from-ns prod-modelmesh --preserve-namespace
+```
+
+#### Scenario 3: Partial Migration with Manual Intervention
+```bash
+# Generate resources for manual application
+./modelmesh-to-raw.sh --from-ns modelmesh-serving --preserve-namespace --dry-run
+
+# Manually modify resources if needed
+vi preserve-namespace-backup-*/new-resources/inferenceservice/custom-model.yaml
+
+# Apply manually with full control
+oc apply -f preserve-namespace-backup-*/new-resources/
+```
+
+### Critical Considerations
+
+#### Authentication Token Recreation
+- **Impact**: All service account tokens are recreated during migration
+- **Action Required**: Update all consumers with new authentication tokens
+- **Get New Tokens**:
+  ```bash
+  oc get secret token-<model-name>-sa -n modelmesh-serving -o jsonpath='{.data.token}' | base64 -d
+  ```
+
+#### Network Policy Updates
+- **Impact**: Network policies referencing ModelMesh-specific labels may need updates
+- **Action Required**: Review and update network policies for KServe Raw deployment labels
+
+#### Resource Quota Considerations
+- **Impact**: Resource requirements may change during migration
+- **Action Required**: Ensure namespace has sufficient quota for both old and new resources during transition
+
+#### Monitoring and Alerting
+- **Impact**: Monitoring systems may lose track of resources during the destructive phase
+- **Action Required**:
+  - Temporarily silence alerts during migration window
+  - Update monitoring queries for KServe Raw resource labels
+  - Verify metrics collection resumes after migration
+
+### Troubleshooting Preserve-Namespace Mode
+
+#### Migration Hangs or Times Out
+```bash
+# Check for stuck resources
+oc get all -n modelmesh-serving
+oc get events -n modelmesh-serving --sort-by='.lastTimestamp'
+
+# Force delete stuck resources
+oc delete inferenceservice <stuck-model> --grace-period=0 --force
+```
+
+#### Partial Migration State
+```bash
+# Check which phase failed
+oc get namespace modelmesh-serving --show-labels
+oc get inferenceservice -n modelmesh-serving
+oc get servingruntime -n modelmesh-serving
+
+# Use backup to restore to known state
+cd preserve-namespace-backup-*/
+# Follow ROLLBACK_INSTRUCTIONS.md
+```
+
+#### Resource Creation Failures
+```bash
+# Check resource quotas
+oc describe quota -n modelmesh-serving
+
+# Check RBAC permissions
+oc auth can-i create inferenceservices --as=system:serviceaccount:modelmesh-serving:default
+
+# Review backup logs
+cat preserve-namespace-backup-*/migration.log  # if log file exists
+```
+
+### Best Practices Summary
+
+#### Before Migration
+- ✅ **Test in non-production environment first**
+- ✅ **Verify sufficient resource quotas**
+- ✅ **Document current authentication tokens**
+- ✅ **Notify consumers of planned downtime**
+- ✅ **Create manual backups if required by policy**
+
+#### During Migration
+- ✅ **Use debug mode for critical migrations**
+- ✅ **Monitor cluster resource usage**
+- ✅ **Keep backup directory accessible**
+- ✅ **Have rollback procedures ready**
+
+#### After Migration
+- ✅ **Verify all models are functional**
+- ✅ **Update authentication tokens in consumer applications**
+- ✅ **Update monitoring and alerting configurations**
+- ✅ **Archive backup directories according to retention policy**
+- ✅ **Document any manual changes made during migration**
 
 ## Help
 
