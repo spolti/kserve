@@ -285,8 +285,14 @@ var _ = Describe("LLMInferenceService Controller", func() {
 
 				Expect(expectedHTTPRoute).To(BeControlledBy(llmSvc))
 				Expect(expectedHTTPRoute).To(HaveGatewayRefs(gatewayapi.ParentReference{Name: "kserve-ingress-gateway"}))
-				Expect(expectedHTTPRoute).To(HaveBackendRefs(BackendRefInferencePool(svcName + "-inference-pool")))
-				Expect(expectedHTTPRoute).To(Not(HaveBackendRefs(BackendRefService(svcName + "-kserve-workload-svc"))))
+				// llmisvc is created with the default route and scheduler spec which results in two inference pool and one service backend refs
+				Expect(expectedHTTPRoute).To(
+					HaveBackendRefs(
+						BackendRefInferencePool(svcName+"-inference-pool"),
+						BackendRefInferencePool(svcName+"-inference-pool"),
+						BackendRefService(svcName+"-kserve-workload-svc"),
+					),
+				)
 
 				ensureRouterManagedResourcesAreReady(ctx, envTest.Client, llmSvc)
 
@@ -355,8 +361,14 @@ var _ = Describe("LLMInferenceService Controller", func() {
 
 				Expect(expectedHTTPRoute).To(BeControlledBy(llmSvc))
 				Expect(expectedHTTPRoute).To(HaveGatewayRefs(gatewayapi.ParentReference{Name: "kserve-ingress-gateway"}))
-				Expect(expectedHTTPRoute).To(HaveBackendRefs(BackendRefInferencePool(infPoolName)))
-				Expect(expectedHTTPRoute).To(Not(HaveBackendRefs(BackendRefService(svcName + "-kserve-workload-svc"))))
+				// llmisvc is created with the default route and scheduler spec which results in two inference pool and one service backend refs
+				Expect(expectedHTTPRoute).To(
+					HaveBackendRefs(
+						BackendRefInferencePool(infPoolName),
+						BackendRefInferencePool(infPoolName),
+						BackendRefService(svcName+"-kserve-workload-svc"),
+					),
+				)
 
 				ensureInferencePoolReady(ctx, envTest.Client, infPool)
 				ensureRouterManagedResourcesAreReady(ctx, envTest.Client, llmSvc)
@@ -410,8 +422,14 @@ var _ = Describe("LLMInferenceService Controller", func() {
 
 				Expect(expectedHTTPRoute).To(BeControlledBy(llmSvc))
 				Expect(expectedHTTPRoute).To(HaveGatewayRefs(gatewayapi.ParentReference{Name: "kserve-ingress-gateway"}))
-				Expect(expectedHTTPRoute).To(HaveBackendRefs(BackendRefService(svcName)))
-				Expect(expectedHTTPRoute).To(Not(HaveBackendRefs(BackendRefInferencePool(kmeta.ChildName(llmSvcName, "-inference-pool")))))
+				// llmisvc is created with the default route spec and no scheduler spec which results in three service backend refs
+				Expect(expectedHTTPRoute).To(
+					HaveBackendRefs(
+						BackendRefService(svcName),
+						BackendRefService(svcName),
+						BackendRefService(svcName),
+					),
+				)
 
 				Eventually(func(g Gomega, ctx context.Context) error {
 					svc := &corev1.Service{}
@@ -476,6 +494,7 @@ var _ = Describe("LLMInferenceService Controller", func() {
 
 				Expect(expectedHTTPRoute).To(BeControlledBy(llmSvc))
 				Expect(expectedHTTPRoute).To(HaveGatewayRefs(gatewayapi.ParentReference{Name: "my-ingress-gateway"}))
+				// llmisvc is created with custom route spec and no scheduler which results in one service backend ref
 				Expect(expectedHTTPRoute).To(HaveBackendRefs(BackendRefService("my-inference-service")))
 				Expect(expectedHTTPRoute).To(Not(HaveBackendRefs(BackendRefInferencePool(kmeta.ChildName(svcName, "-inference-pool")))))
 
