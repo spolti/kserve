@@ -379,7 +379,7 @@ save_original_resource() {
         if [[ "$get_output" =~ ^(apiVersion:|kind:) ]]; then
             # Save to backup directory using unified function
             save_backup_resource "$resource_type" "${resource_name}-original" "$get_output" "original-resources"
-            echo "  💾 [BACKUP] Successfully saved $resource_type '$resource_name')"
+            echo "  💾 [BACKUP] Successfully saved $resource_type '$resource_name'"
         else
             echo "  ⚠️  Warning: Retrieved content for $resource_type '$resource_name' doesn't appear to be YAML"
             echo "  🔍 First 200 chars: ${get_output:0:200}..."
@@ -518,7 +518,7 @@ create_target_namespace() {
     else
         echo "🏗️ Creating namespace '$TARGET_NS'..."
         if oc create namespace "$TARGET_NS"; then
-            echo "  ${SUCCESS_SYMBOL} Created namespace '$TARGET_NS'"
+            echo -e "  ${SUCCESS_SYMBOL} Created namespace '$TARGET_NS'"
         else
             echo -e "${ERROR_SYMBOL} Failed to create target namespace"
             exit 1
@@ -528,16 +528,16 @@ create_target_namespace() {
     # Apply required labels
     echo "🏷️  Applying namespace labels..."
     if oc label namespace "$TARGET_NS" opendatahub.io/dashboard="true" --overwrite >/dev/null 2>&1; then
-        echo "    ${SUCCESS_SYMBOL} Dashboard label applied"
+        echo -e "    ${SUCCESS_SYMBOL} Dashboard label applied"
     else
-        echo "    ${ERROR_SYMBOL} Failed to apply dashboard label"
+        echo -e "    ${ERROR_SYMBOL} Failed to apply dashboard label"
         exit 1
     fi
 
     if oc label namespace "$TARGET_NS" modelmesh-enabled="false" --overwrite >/dev/null 2>&1; then
-        echo "    ${SUCCESS_SYMBOL} ModelMesh disabled"
+        echo -e "    ${SUCCESS_SYMBOL} ModelMesh disabled"
     else
-        echo "    ${ERROR_SYMBOL} Failed to set modelmesh-enabled=false"
+        echo -e "    ${ERROR_SYMBOL} Failed to set modelmesh-enabled=false"
         exit 1
     fi
 
@@ -553,9 +553,7 @@ list_and_select_inference_services() {
     local isvc_count=0
 
     # Get all InferenceServices in the source namespace
-    local isvc_list=$(oc get inferenceservice -n "$FROM_NS" -o yaml 2>/dev/null)
-
-    if [[ $? -ne 0 ]]; then
+    if ! local isvc_list=$(oc get inferenceservice -n "$FROM_NS" -o yaml 2>/dev/null); then
         echo -e "${ERROR_SYMBOL} Failed to retrieve InferenceServices from namespace '$FROM_NS'"
         echo "  📋 Please ensure you have access to the namespace and InferenceServices exist."
         exit 1
@@ -950,8 +948,7 @@ create_serving_runtimes() {
         echo "📋 Checking runtime for model '$isvc_name'..."
 
         # Get the original InferenceService
-        local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>&1)
-        if [[ $? -ne 0 ]]; then
+        if ! local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>&1); then
             ERRORS+=("Failed to get InferenceService '$isvc_name' from '$FROM_NS': $original_isvc")
             index=$((index+1))
             continue
@@ -1003,16 +1000,15 @@ create_serving_runtimes() {
         if [[ "$PRESERVE_NAMESPACE" == "true" ]]; then
             echo "  💾 Backing up original serving runtime..."
             # Get the runtime name from the InferenceService
-            local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>/dev/null)
-            if [[ $? -eq 0 ]]; then
+            if ! local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>/dev/null); then
+                echo "    ⚠️  Could not retrieve InferenceService '$isvc_name', skipping original backup"
+            else
                 local original_runtime_name=$(echo "$original_isvc" | yq '.spec.predictor.model.runtime // ""')
                 if [[ -n "$original_runtime_name" ]]; then
                     save_original_resource "servingruntime" "$original_runtime_name" "$FROM_NS"
                 else
                     echo "    ⚠️  No runtime name found for '$isvc_name', skipping original backup"
                 fi
-            else
-                echo "    ⚠️  Could not retrieve InferenceService '$isvc_name', skipping original backup"
             fi
         fi
 
@@ -1020,9 +1016,7 @@ create_serving_runtimes() {
         echo "  🔧 Preparing new serving runtime..."
 
         # Get the template from template namespace
-        local runtime_template=$(oc get template "$template_name" -n "$TEMPLATE_NAMESPACE" -o yaml 2>/dev/null)
-
-        if [[ $? -ne 0 ]]; then
+        if ! local runtime_template=$(oc get template "$template_name" -n "$TEMPLATE_NAMESPACE" -o yaml 2>/dev/null); then
             echo -e "${ERROR_SYMBOL} Failed to retrieve '$template_name' template from $TEMPLATE_NAMESPACE namespace"
             echo "    📋 Please ensure the template '$template_name' exists in the $TEMPLATE_NAMESPACE namespace."
             exit 1
@@ -1124,7 +1118,7 @@ clone_storage_secrets() {
                     local decoded_uri=$(echo "$secret_data" | base64 -d 2>/dev/null || echo "")
                     if [[ -n "$decoded_uri" && "$decoded_uri" == "$current_storage_uri" ]]; then
                         prioritized_secret="$secret_name"
-                        echo -r "        ${SUCCESS_SYMBOL} Found URI match in secret '$secret_name': $decoded_uri"
+                        echo -e "        ${SUCCESS_SYMBOL} Found URI match in secret '$secret_name': $decoded_uri"
                         break
                     fi
                 fi
@@ -1213,7 +1207,7 @@ clone_storage_secrets() {
                             echo "  ❌ No valid secrets selected. Using default: 1 (${secret_array[0]})"
                             valid_selections=("${secret_array[0]}")
                         else
-                            echo "  ${SUCCESS_SYMBOL} Proceeding with valid selections: ${valid_selections[*]}"
+                            echo -e "  ${SUCCESS_SYMBOL} Proceeding with valid selections: ${valid_selections[*]}"
                         fi
                     fi
 
@@ -1272,8 +1266,7 @@ clone_user_secret() {
         fi
     fi
 
-    local secret_yaml=$(oc get secret "$secret_name" -n "$FROM_NS" -o yaml 2>&1)
-    if [[ $? -ne 0 ]]; then
+    if ! local secret_yaml=$(oc get secret "$secret_name" -n "$FROM_NS" -o yaml 2>&1); then
         ERRORS+=("Failed to get secret '$secret_name' from '$FROM_NS': $secret_yaml")
         return
     fi
@@ -1290,7 +1283,7 @@ clone_user_secret() {
 
     # Apply the secret to target namespace
     if apply_or_save_resource "secret" "$secret_name" "$transformed_secret" "$TARGET_NS"; then
-        echo "        ${SUCCESS_SYMBOL} Cloned secret '$secret_name' to namespace '$TARGET_NS'"
+        echo -e "        ${SUCCESS_SYMBOL} Cloned secret '$secret_name' to namespace '$TARGET_NS'"
     else
         ERRORS+=("Failed to clone secret '$secret_name' to namespace '$TARGET_NS': $LAST_APPLY_OUTPUT")
     fi
@@ -1510,7 +1503,7 @@ EOF
                 local secret_name="token-$isvc_name-sa"
 
                 if [[ "$DRY_RUN" == "true" ]]; then
-                    echo "      ${SUCCESS_SYMBOL} [DRY-RUN] Would create service account token secret '$secret_name'"
+                    echo -e "      ${SUCCESS_SYMBOL} [DRY-RUN] Would create service account token secret '$secret_name'"
                     # Save the secret for dry-run review
                     save_backup_resource "secret" "$secret_name" "$transformed_secret" "new-resources"
                 else
@@ -1564,7 +1557,7 @@ EOF
         echo -e "    ℹ️  No service account token secrets found for '$isvc_name' in source namespace '$FROM_NS'"
     fi
 
-    echo "${SUCCESS_SYMBOL} Authentication resources ready for '$isvc_name'"
+    echo -e "${SUCCESS_SYMBOL} Authentication resources ready for '$isvc_name'"
 
 }
 
@@ -1587,9 +1580,7 @@ update_storage_config_secret() {
     echo "🔄 Updating data.URI field in secret '$secret_name'..."
 
     # Patch the secret to update the data.URI field
-    local patch_output=$(oc patch secret "$secret_name" -n "$TARGET_NS" --type='json' -p="[{\"op\": \"replace\", \"path\": \"/data/URI\", \"value\": \"$encoded_storage_uri\"}]" 2>&1)
-
-    if [[ $? -eq 0 ]]; then
+    if local patch_output=$(oc patch secret "$secret_name" -n "$TARGET_NS" --type='json' -p="[{\"op\": \"replace\", \"path\": \"/data/URI\", \"value\": \"$encoded_storage_uri\"}]" 2>&1); then
         echo -e "${SUCCESS_SYMBOL} Updated secret '$secret_name' data.URI with: $new_storage_uri"
     else
         echo -e "${ERROR_SYMBOL} Failed to update secret '$secret_name': $patch_output"
@@ -1603,8 +1594,7 @@ process_inference_services() {
     # First pass: collect all original InferenceServices
     for isvc_name in "${SELECTED_ISVCS[@]}"; do
         echo "📋 Collecting original InferenceService '$isvc_name'..."
-        local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>&1)
-        if [[ $? -ne 0 ]]; then
+        if ! local original_isvc=$(oc get inferenceservice "$isvc_name" -n "$FROM_NS" -o yaml 2>&1); then
             ERRORS+=("Failed to get InferenceService '$isvc_name' from '$FROM_NS': $original_isvc")
             continue
         fi
@@ -1816,7 +1806,7 @@ process_inference_services() {
                 echo "  ℹ️  No service account token secrets found for runtime '$original_runtime'"
             fi
 
-            echo "  ${SUCCESS_SYMBOL} Authentication resources backed up"
+            echo -e "  ${SUCCESS_SYMBOL} Authentication resources backed up"
         fi
 
         # Apply the transformed InferenceService to the target namespace
@@ -1929,7 +1919,19 @@ create_serving_runtimes
 # Process the models for migration, prepare the InferenceService manifests
 process_inference_services
 
+# Clean up any empty directories that may have been created
+cleanup_empty_directories
 
+# Clean up empty directories in backup directory
+cleanup_empty_directories() {
+    # Skip if neither mode is enabled or backup directory doesn't exist
+    if [[ "$DRY_RUN" != "true" && "$PRESERVE_NAMESPACE" != "true" ]] || [[ ! -d "$BACKUP_DIR" ]]; then
+        return
+    fi
+
+    # Find and remove empty directories silently
+    find "$BACKUP_DIR" -type d -empty -delete 2>/dev/null || true
+}
 
 # Generate dry-run summary if in dry-run mode
 generate_dry_run_summary() {
