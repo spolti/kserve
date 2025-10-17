@@ -1687,12 +1687,14 @@ process_inference_services() {
         local final_path="$current_path"
         local final_storage_uri="$current_storage_uri"
         local storage_field_to_update=""
+        local keep_current_config=false
 
         case "$storage_choice" in
             "1"|"")
                 echo "✅ Keeping current configuration"
                 echo "   Path: ${current_path:-"(not set)"}"
                 echo "   StorageUri: ${current_storage_uri:-"(not set)"}"
+                keep_current_config=true
                 ;;
             "2")
                 echo "📝 Enter the new storage path (e.g., openvino/mnist/):"
@@ -1770,6 +1772,12 @@ process_inference_services() {
             else
                 echo "ℹ️  No storage secret was selected during cloning, skipping secret update"
             fi
+        fi
+
+        # Add OpenVINO auto-versioning annotation when keeping current configuration
+        if [[ "$keep_current_config" == "true" ]]; then
+            transformed_isvc=$(echo "$transformed_isvc" | yq '.metadata.annotations."storage.kserve.io/ovms-auto-versioning" = "1"')
+            echo "  🔧 Applied OpenVINO auto-versioning annotation: storage.kserve.io/ovms-auto-versioning=1"
         fi
 
         # Save original InferenceService for review (both dry-run and preserve-namespace modes)
