@@ -158,7 +158,7 @@ var _ = Describe("LLMInferenceService Controller", func() {
 				routes, errList := managedRoutes(ctx, llmSvc)
 				g.Expect(errList).ToNot(HaveOccurred())
 				g.Expect(routes).To(HaveLen(1))
-				g.Expect(llmisvc.IsHTTPRouteReady(&routes[0])).To(BeTrue())
+				g.Expect(llmisvc.IsHTTPRouteReady(llmSvc, &routes[0])).To(BeTrue())
 				return nil
 			}).WithContext(ctx).Should(Succeed())
 
@@ -473,7 +473,7 @@ var _ = Describe("LLMInferenceService Controller", func() {
 					InNamespace[*v1alpha1.LLMInferenceService](nsName),
 					WithModelURI("hf://facebook/opt-125m"),
 					WithManagedGateway(),
-					WithHTTPRouteSpec(customRouteSpec(ctx, envTest.Client, nsName, "my-ingress-gateway", "my-inference-service")),
+					WithHTTPRouteSpec(customRouteSpec(ctx, envTest.Client, &v1alpha1.LLMInferenceService{}, nsName, "my-ingress-gateway", "my-inference-service")),
 				)
 
 				// when
@@ -571,7 +571,7 @@ var _ = Describe("LLMInferenceService Controller", func() {
 				Expect(envTest.Client.Create(ctx, customHTTPRoute)).To(Succeed())
 
 				// Make the HTTPRoute ready
-				ensureHTTPRouteReady(ctx, envTest.Client, customHTTPRoute)
+				ensureHTTPRouteReady(ctx, envTest.Client, llmSvc, customHTTPRoute)
 
 				// when - Update the HTTPRoute spec
 				errRetry := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -631,7 +631,7 @@ var _ = Describe("LLMInferenceService Controller", func() {
 				Expect(envTest.Client.Create(ctx, customHTTPRoute)).To(Succeed())
 
 				// Make the HTTPRoute ready
-				ensureHTTPRouteReady(ctx, envTest.Client, customHTTPRoute)
+				ensureHTTPRouteReady(ctx, envTest.Client, &v1alpha1.LLMInferenceService{}, customHTTPRoute)
 
 				llmSvc := LLMInferenceService(svcName,
 					InNamespace[*v1alpha1.LLMInferenceService](nsName),
@@ -1171,7 +1171,7 @@ func ensureGatewayReady(ctx context.Context, c client.Client, gateway *gatewayap
 
 // ensureHTTPRouteReady sets up HTTPRoute status conditions to simulate a ready HTTPRoute
 // Only runs in non-cluster mode
-func ensureHTTPRouteReady(ctx context.Context, c client.Client, route *gatewayapi.HTTPRoute) {
+func ensureHTTPRouteReady(ctx context.Context, c client.Client, llmSvc *v1alpha1.LLMInferenceService, route *gatewayapi.HTTPRoute) {
 	if envTest.UsingExistingCluster() {
 		return
 	}
@@ -1183,7 +1183,7 @@ func ensureHTTPRouteReady(ctx context.Context, c client.Client, route *gatewayap
 	// Set the status conditions to simulate the Gateway controller making the HTTPRoute ready
 	// HTTPRoute readiness is determined by parent status conditions
 	if len(createdRoute.Spec.ParentRefs) > 0 {
-		createdRoute.Status.RouteStatus.Parents = make([]gatewayapi.RouteParentStatus, len(createdRoute.Spec.ParentRefs))
+		createdRoute.Status.RouteStatus.Parents = make([]gatewayapi.RouteParentStatus, len(createdRoute.Spec.ParentRefs)*2)
 		for i, parentRef := range createdRoute.Spec.ParentRefs {
 			createdRoute.Status.RouteStatus.Parents[i] = gatewayapi.RouteParentStatus{
 				ParentRef:      parentRef,
@@ -1205,6 +1205,18 @@ func ensureHTTPRouteReady(ctx context.Context, c client.Client, route *gatewayap
 					},
 				},
 			}
+			createdRoute.Status.RouteStatus.Parents[len(createdRoute.Spec.ParentRefs)+i] = gatewayapi.RouteParentStatus{
+				ParentRef:      parentRef,
+				ControllerName: "kuadrant.io/policy-controller",
+				Conditions: []metav1.Condition{
+					{
+						Type:               "kuadrant.io/AuthPolicyAffected",
+						Status:             metav1.ConditionTrue,
+						Reason:             "Accepted",
+						LastTransitionTime: metav1.Now(),
+					},
+				},
+			}
 		}
 	}
 
@@ -1215,7 +1227,7 @@ func ensureHTTPRouteReady(ctx context.Context, c client.Client, route *gatewayap
 	Eventually(func(g Gomega, ctx context.Context) bool {
 		updatedRoute := &gatewayapi.HTTPRoute{}
 		g.Expect(c.Get(ctx, client.ObjectKeyFromObject(route), updatedRoute)).To(Succeed())
-		return llmisvc.IsHTTPRouteReady(updatedRoute)
+		return llmisvc.IsHTTPRouteReady(llmSvc, updatedRoute)
 	}).WithContext(ctx).Should(BeTrue())
 }
 
@@ -1330,7 +1342,7 @@ func ensureSchedulerDeploymentReady(ctx context.Context, c client.Client, llmSvc
 	}
 }
 
-func customRouteSpec(ctx context.Context, c client.Client, nsName, gatewayRefName, backendRefName string) *gatewayapi.HTTPRouteSpec {
+func customRouteSpec(ctx context.Context, c client.Client, llmSvc *v1alpha1.LLMInferenceService, nsName, gatewayRefName, backendRefName string) *gatewayapi.HTTPRouteSpec {
 	customGateway := Gateway(gatewayRefName,
 		InNamespace[*gatewayapi.Gateway](nsName),
 		WithClassName("istio"),
@@ -1362,7 +1374,7 @@ func customRouteSpec(ctx context.Context, c client.Client, nsName, gatewayRefNam
 	Expect(c.Create(ctx, route)).To(Succeed())
 
 	// Ensure the HTTPRoute becomes ready
-	ensureHTTPRouteReady(ctx, c, route)
+	ensureHTTPRouteReady(ctx, c, llmSvc, route)
 
 	httpRouteSpec := &route.Spec
 
