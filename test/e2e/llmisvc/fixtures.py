@@ -103,6 +103,9 @@ LLMINFERENCESERVICE_CONFIGS = {
             "name": "deepseek-ai/DeepSeek-V2-Lite-Chat",
         },
     },
+    "model-qwen2.5-0.5b": {
+        "model": {"uri": "hf://Qwen/Qwen2.5-0.5B", "name": "Qwen/Qwen/Qwen2.5-0.5B"},
+    },
     "workload-dp-ep-gpu": {
         "replicas": 2,
         "parallelism": {
@@ -362,6 +365,74 @@ LLMINFERENCESERVICE_CONFIGS = {
                                     {
                                         "path": {
                                             "type": "PathPrefix",
+                                            "value": "/kserve-ci-e2e-test/custom-route-timeout-test/v1/completions",
+                                        },
+                                    },
+                                ],
+                                "filters": [
+                                    {
+                                        "type": "URLRewrite",
+                                        "urlRewrite": {
+                                            "path": {
+                                                "replacePrefixMatch": "/v1/completions",
+                                                "type": "ReplacePrefixMatch",
+                                            },
+                                        },
+                                    },
+                                ],
+                                "backendRefs": [
+                                    {
+                                        "group": "inference.networking.x-k8s.io",
+                                        "kind": "InferencePool",
+                                        "name": "custom-route-timeout-test-inference-pool",
+                                        "namespace": KSERVE_TEST_NAMESPACE,
+                                        "port": 8000,
+                                    }
+                                ],
+                            },
+                            {
+                                "timeouts": {
+                                    "request": "30s",
+                                    "backendRequest": "30s",
+                                },
+                                "matches": [
+                                    {
+                                        "path": {
+                                            "type": "PathPrefix",
+                                            "value": "/kserve-ci-e2e-test/custom-route-timeout-test/v1/chat/completions",
+                                        },
+                                    },
+                                ],
+                                "filters": [
+                                    {
+                                        "type": "URLRewrite",
+                                        "urlRewrite": {
+                                            "path": {
+                                                "replacePrefixMatch": "/v1/chat/completions",
+                                                "type": "ReplacePrefixMatch",
+                                            },
+                                        },
+                                    },
+                                ],
+                                "backendRefs": [
+                                    {
+                                        "group": "inference.networking.x-k8s.io",
+                                        "kind": "InferencePool",
+                                        "name": "custom-route-timeout-test-inference-pool",
+                                        "namespace": KSERVE_TEST_NAMESPACE,
+                                        "port": 8000,
+                                    }
+                                ],
+                            },
+                            {
+                                "timeouts": {
+                                    "request": "30s",
+                                    "backendRequest": "30s",
+                                },
+                                "matches": [
+                                    {
+                                        "path": {
+                                            "type": "PathPrefix",
                                             "value": "/kserve-ci-e2e-test/custom-route-timeout-test",
                                         },
                                     },
@@ -379,9 +450,9 @@ LLMINFERENCESERVICE_CONFIGS = {
                                 ],
                                 "backendRefs": [
                                     {
-                                        "group": "inference.networking.x-k8s.io",
-                                        "kind": "InferencePool",
-                                        "name": "custom-route-timeout-test-inference-pool",
+                                        "group": "",
+                                        "kind": "Service",
+                                        "name": "custom-route-timeout-test-kserve-workload-svc",
                                         "namespace": KSERVE_TEST_NAMESPACE,
                                         "port": 8000,
                                     }
@@ -409,6 +480,74 @@ LLMINFERENCESERVICE_CONFIGS = {
                                     {
                                         "path": {
                                             "type": "PathPrefix",
+                                            "value": "/kserve-ci-e2e-test/custom-route-timeout-pd-test/v1/completions",
+                                        },
+                                    },
+                                ],
+                                "filters": [
+                                    {
+                                        "type": "URLRewrite",
+                                        "urlRewrite": {
+                                            "path": {
+                                                "replacePrefixMatch": "/v1/completions",
+                                                "type": "ReplacePrefixMatch",
+                                            },
+                                        },
+                                    },
+                                ],
+                                "backendRefs": [
+                                    {
+                                        "group": "inference.networking.x-k8s.io",
+                                        "kind": "InferencePool",
+                                        "name": "custom-route-timeout-pd-test-inference-pool",
+                                        "namespace": KSERVE_TEST_NAMESPACE,
+                                        "port": 8000,
+                                    }
+                                ],
+                            },
+                            {
+                                "timeouts": {
+                                    "request": "30s",
+                                    "backendRequest": "30s",
+                                },
+                                "matches": [
+                                    {
+                                        "path": {
+                                            "type": "PathPrefix",
+                                            "value": "/kserve-ci-e2e-test/custom-route-timeout-pd-test/v1/chat/completions",
+                                        },
+                                    },
+                                ],
+                                "filters": [
+                                    {
+                                        "type": "URLRewrite",
+                                        "urlRewrite": {
+                                            "path": {
+                                                "replacePrefixMatch": "/v1/chat/completions",
+                                                "type": "ReplacePrefixMatch",
+                                            },
+                                        },
+                                    },
+                                ],
+                                "backendRefs": [
+                                    {
+                                        "group": "inference.networking.x-k8s.io",
+                                        "kind": "InferencePool",
+                                        "name": "custom-route-timeout-pd-test-inference-pool",
+                                        "namespace": KSERVE_TEST_NAMESPACE,
+                                        "port": 8000,
+                                    }
+                                ],
+                            },
+                            {
+                                "timeouts": {
+                                    "request": "30s",
+                                    "backendRequest": "30s",
+                                },
+                                "matches": [
+                                    {
+                                        "path": {
+                                            "type": "PathPrefix",
                                             "value": "/kserve-ci-e2e-test/custom-route-timeout-pd-test",
                                         },
                                     },
@@ -426,9 +565,9 @@ LLMINFERENCESERVICE_CONFIGS = {
                                 ],
                                 "backendRefs": [
                                     {
-                                        "group": "inference.networking.x-k8s.io",
-                                        "kind": "InferencePool",
-                                        "name": "custom-route-timeout-pd-test-inference-pool",
+                                        "group": "",
+                                        "kind": "Service",
+                                        "name": "custom-route-timeout-pd-test-kserve-workload-svc",
                                         "namespace": KSERVE_TEST_NAMESPACE,
                                         "port": 8000,
                                     }
