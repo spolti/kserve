@@ -162,7 +162,7 @@ func GetPredictorEndpoint(ctx context.Context, client client.Client, isvc *v1bet
 					// in the ISVC, the protocol cannot imply to be V1. The protocol
 					// needs to be extracted from the Runtime.
 
-					runtime, err, _ := GetServingRuntime(ctx, client, *modelSpec.Runtime, isvc.Namespace)
+					runtime, err := GetServingRuntime(ctx, client, *modelSpec.Runtime, isvc.Namespace)
 					if err != nil {
 						return "", err
 					}
@@ -307,25 +307,24 @@ func MergePodSpec(runtimePodSpec *v1alpha1.ServingRuntimePodSpec, predictorPodSp
 
 // GetServingRuntime Get a ServingRuntime by name. First, ServingRuntimes in the given namespace will be checked.
 // If a resource of the specified name is not found, then ClusterServingRuntimes will be checked.
-// Third value will be true if the ServingRuntime is a ClusterServingRuntime.
-func GetServingRuntime(ctx context.Context, cl client.Client, name string, namespace string) (*v1alpha1.ServingRuntimeSpec, error, bool) {
+func GetServingRuntime(ctx context.Context, cl client.Client, name string, namespace string) (*v1alpha1.ServingRuntimeSpec, error) {
 	runtime := &v1alpha1.ServingRuntime{}
 	err := cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, runtime)
 	if err == nil {
-		return &runtime.Spec, nil, false
+		return &runtime.Spec, nil
 	} else if !apierrors.IsNotFound(err) {
-		return nil, err, false
+		return nil, err
 	}
 
 	// ODH does not support ClusterServingRuntimes
 	// clusterRuntime := &v1alpha1.ClusterServingRuntime{}
 	// err = cl.Get(ctx, client.ObjectKey{Name: name}, clusterRuntime)
 	// if err == nil {
-	//	return &clusterRuntime.Spec, nil, true
+	//	return &clusterRuntime.Spec, nil
 	// } else if !apierrors.IsNotFound(err) {
-	//	return nil, err, false
+	//	return nil, err
 	//}
-	return nil, goerrors.New("No ServingRuntimes with the name: " + name), false
+	return nil, goerrors.New("No ServingRuntimes with the name: " + name)
 }
 
 // ReplacePlaceholders Replace placeholders in runtime container by values from inferenceservice metadata
