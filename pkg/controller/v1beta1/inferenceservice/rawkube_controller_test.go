@@ -102,7 +102,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"enableDirectPvcVolumeMount": false
 			}`,
 	}
-	FContext("When creating inference service with raw kube predictor", func() {
+	Context("When creating inference service with raw kube predictor", func() {
 		It("Should have httproute/service/deployment/httproute created", func() {
 			By("By creating a new InferenceService")
 			// Create configmap
@@ -1780,7 +1780,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
-	FContext("When updating ISVC envs", func() {
+	Context("When updating ISVC envs", func() {
 		It("Should reconcile the deployment if isvc envs are updated", func() {
 			defaultEnvs := []corev1.EnvVar{
 				{
@@ -1965,7 +1965,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(deployed3.Spec.Template.Spec.Containers[0].Env).To(ContainElements(newEnvs))
 		})
 	})
-	FContext("When creating inference service with raw kube predictor and `serving.kserve.io/stop`", func() {
+	Context("When creating inference service with raw kube predictor and `serving.kserve.io/stop`", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"alibi": {
@@ -3356,7 +3356,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 		_ = defaultTransformerIsvc // Mark as intentionally unused for now
 	})
 
-	FContext("When Updating a Serving Runtime", func() {
+	Context("When Updating a Serving Runtime", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"alibi": {
@@ -4064,7 +4064,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 		})
 	})
 
-	FContext("When creating inference service with raw kube predictor and ingress creation disabled", func() {
+	Context("When creating inference service with raw kube predictor and ingress creation disabled", func() {
 		configs := map[string]string{
 			"explainers": `{
 	             "alibi": {
@@ -4485,7 +4485,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualHPA.Spec).To(BeComparableTo(expectedHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube predictor with domain template", func() {
+	Context("When creating inference service with raw kube predictor with domain template", func() {
 		configs := map[string]string{
 			"explainers": `{
 	             "alibi": {
@@ -5062,7 +5062,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualHPA.Spec).To(BeComparableTo(expectedHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube predictor and transformer", func() {
+	Context("When creating inference service with raw kube predictor and transformer", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"alibi": {
@@ -5966,7 +5966,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualTransformerHPA.Spec).To(BeComparableTo(expectedTransformerHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube predictor and explainer", func() {
+	Context("When creating inference service with raw kube predictor and explainer", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"art": {
@@ -6919,7 +6919,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualExplainerHPA.Spec).To(BeComparableTo(expectedExplainerHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube path based routing predictor", func() {
+	Context("When creating inference service with raw kube path based routing predictor", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"alibi": {
@@ -7551,7 +7551,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualHPA.Spec).To(BeComparableTo(expectedHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube path based routing predictor and transformer", func() {
+	Context("When creating inference service with raw kube path based routing predictor and transformer", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"alibi": {
@@ -8505,7 +8505,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualTransformerHPA.Spec).To(BeComparableTo(expectedTransformerHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube path based routing predictor and explainer", func() {
+	Context("When creating inference service with raw kube path based routing predictor and explainer", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"art": {
@@ -9550,7 +9550,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualExplainerHPA.Spec).To(BeComparableTo(expectedExplainerHPA.Spec))
 		})
 	})
-	FContext("When creating inference service with raw kube predictor with gateway api disabled", func() {
+	Context("When creating inference service with raw kube predictor with gateway api disabled", func() {
 		configs := map[string]string{
 			"explainers": `{
 				"alibi": {
@@ -10382,7 +10382,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualHPA.Spec).To(Equal(expectedHPA.Spec))
 		})
 	})
-	FContext("When creating an inferenceservice with raw kube predictor and ODH auth enabled", func() {
+	Context("When creating an inferenceservice with raw kube predictor and ODH auth enabled", func() {
 		configs := map[string]string{
 			"oauthProxy":         `{"image": "quay.io/opendatahub/odh-kube-auth-proxy@sha256:dcb09fbabd8811f0956ef612a0c9ddd5236804b9bd6548a0647d2b531c9d01b3", "memoryRequest": "64Mi", "memoryLimit": "128Mi", "cpuRequest": "100m", "cpuLimit": "200m"}`,
 			"ingress":            `{"ingressGateway": "knative-serving/knative-ingress-gateway", "ingressService": "test-destination", "localGateway": "knative-serving/knative-local-gateway", "localGatewayService": "knative-local-gateway.istio-system.svc.cluster.local"}`,
@@ -11061,7 +11061,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 		})
 	})
 
-	FContext("When creating inference service with raw kube predictor with workerSpec", func() {
+	Context("When creating inference service with raw kube predictor with workerSpec", func() {
 		var (
 			serviceKey types.NamespacedName
 			storageUri string
@@ -12021,7 +12021,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
-	FContext("When creating an inference service with modelcar and raw deployment", func() {
+	Context("When creating an inference service with modelcar and raw deployment", func() {
 		configs := map[string]string{
 			"ingress": `{
 				"enableGatewayApi": true,
