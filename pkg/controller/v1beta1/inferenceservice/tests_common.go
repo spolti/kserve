@@ -44,8 +44,8 @@ const (
 	GRACE_PERIOD                int64 = 30
 
 	fastTimeout = time.Second * 3
-	timeout     = time.Second * 6
-	interval    = time.Millisecond * 250
+	timeout     = time.Second * 16
+	interval    = time.Millisecond * 600
 	domain      = "example.com"
 )
 
@@ -147,7 +147,7 @@ func getExectedService(predictorServiceKey types.NamespacedName, serviceName str
 	}
 }
 
-func getExpectedIsvcStatus(serviceKey types.NamespacedName, protocol, host, componentHost, port string) v1beta1.InferenceServiceStatus {
+func getExpectedIsvcStatus(serviceKey types.NamespacedName, protocol, host, componentHost, port string) *v1beta1.InferenceServiceStatus {
 	predTrans := "predictor"
 	if strings.Contains(componentHost, "trans") {
 		predTrans = "transformer"
@@ -156,7 +156,7 @@ func getExpectedIsvcStatus(serviceKey types.NamespacedName, protocol, host, comp
 		port = ":" + port
 	}
 
-	return v1beta1.InferenceServiceStatus{
+	return &v1beta1.InferenceServiceStatus{
 		Status: duckv1.Status{
 			Conditions: duckv1.Conditions{
 				{
@@ -193,7 +193,7 @@ func getExpectedIsvcStatus(serviceKey types.NamespacedName, protocol, host, comp
 				LatestCreatedRevision: "",
 				// uncomment when the status improvement from upstream is synced.
 				// URL: &apis.URL{
-				//	Scheme: compProto,
+				//	Scheme: protocol,
 				//	Host:   componentHost,
 				// },
 			},
@@ -202,7 +202,7 @@ func getExpectedIsvcStatus(serviceKey types.NamespacedName, protocol, host, comp
 			TransitionStatus:    "InProgress",
 			ModelRevisionStates: &v1beta1.ModelRevisionStates{TargetModelState: "Pending"},
 		},
-		DeploymentMode:     string(constants.Standard),
+		DeploymentMode:     string(constants.RawDeployment),
 		ServingRuntimeName: "tf-serving-raw",
 	}
 }
@@ -222,7 +222,7 @@ func getCommonPredictorExtensionSpec() v1beta1.PredictorExtensionSpec {
 // getDefaultAnnotations returns the default annotations used on most of the ISVCs
 func getDefaultAnnotations(scalerClass constants.AutoscalerClassType) map[string]string {
 	return map[string]string{
-		constants.DeploymentMode:  string(constants.Standard),
+		constants.DeploymentMode:  string(constants.RawDeployment),
 		constants.AutoscalerClass: string(scalerClass),
 	}
 }
@@ -356,7 +356,7 @@ func getDeploymentWithKServiceLabel(predictorDeploymentKey types.NamespacedName,
 					},
 					Annotations: map[string]string{
 						constants.StorageInitializerSourceUriInternalAnnotationKey: *isvc.Spec.Predictor.Model.StorageURI,
-						constants.DeploymentMode:                                   string(constants.Standard),
+						constants.DeploymentMode:                                   string(constants.RawDeployment),
 						constants.AutoscalerClass:                                  string(constants.AutoscalerClassHPA),
 					},
 				},

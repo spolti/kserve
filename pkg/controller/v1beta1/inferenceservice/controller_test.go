@@ -609,7 +609,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 							Tensorflow: &v1beta1.TFServingSpec{
 								PredictorExtensionSpec: v1beta1.PredictorExtensionSpec{
 									StorageURI:     &storageUri,
-									RuntimeVersion: proto.String("1.14.0"),
+									RuntimeVersion: ptr.To("1.14.0"),
 									Container: corev1.Container{
 										Name:      constants.InferenceServiceContainerName,
 										Resources: defaultResource,
