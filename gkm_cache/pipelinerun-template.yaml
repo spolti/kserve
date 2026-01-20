@@ -1,0 +1,64 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  generateName: vllm-cache-builder-
+  labels:
+    app: gkm-cache-builder
+    model: "mistral-small-3-1-24b-instruct-2503"  # Label-safe model name (no slashes)
+    pipeline-version: v1.0.0
+  annotations:
+    description: "Build vLLM compilation cache for faster model serving"
+spec:
+  pipelineRef:
+    name: vllm-cache-builder
+  serviceAccountName: buildah-sa
+  params:
+  # REQUIRED: Update these parameters for your model
+  - name: model-name
+    value: "oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5"  # Red Hat Mistral Small 3.1 24B ModelCar image
+  - name: model-name-clean
+    value: "mistral-small-3-1-24b-instruct-2503"  # Label-safe model name (lowercase, no slashes)
+  - name: model-revision
+    value: "main"                       # Model revision (only for HuggingFace models)
+  - name: target-gpu-arch
+    value: ""                          # Auto-detected from cluster GPUs (leave empty unless override needed)
+  - name: registry-url
+    value: "quay.io/spolti"            # Your container registry
+  - name: registry-secret
+    value: "registry-push-secret"      # docker-registry secret with push credentials (see build-service-account.yaml)
+
+  # OPTIONAL: Customize these as needed
+  - name: max-model-len
+    value: "2048"                      # Max model length for cache building
+  - name: cache-tag
+    value: ""                          # Custom tag (auto-generated if empty)
+  - name: serving-runtime-template
+    value: "vllm-cuda-runtime-template"  # ServingRuntime template from redhat-ods-applications namespace
+  - name: mcv-image
+    value: "quay.io/gkm/mcv:latest"     # Default MCV image (or build from Containerfile.mcv)
+  - name: cosign-secret
+    value: "cosign-signing-key"          # Cosign signing key secret (if not found, uses keyless signing via Sigstore)
+
+  workspaces:
+  # Shared workspace for all pipeline operations (source, cache, artifacts)
+  - name: shared-ws
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi
+
+
+  # Resource requirements for GPU nodes
+  podTemplate:
+    tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+
+  # Cleanup policy
+  timeouts:
+    pipeline: "2h0m0s"  # 2 hours timeout
+    tasks: "60m0s"      # 60 minutes per task

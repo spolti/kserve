@@ -1,0 +1,41 @@
+# GKMCache CR for vLLM compilation cache.
+#
+# GKM extracts the OCI image into a PVC that can be mounted as a volume.
+# The PVC name matches the GKMCache CR name and can be referenced directly
+# in KServe InferenceService via pvc:// storageUri or as a volume mount.
+#
+# Prerequisites:
+#   - GKM operator installed (gkm.io CRDs available)
+#   - Cache OCI image built by the GKM pipeline (task-cache-image-packager)
+#
+# Usage with KServe (pvc:// storageUri):
+#   storageUris:
+#     - uri: "oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5"
+#       mountPath: "/mnt/models/model"
+#     - uri: "pvc://vllm-cache-mistral-small-3-1-24b-instruct-2503"
+#       mountPath: "/mnt/models/cache"
+#
+# Usage with KServe (direct volume mount):
+#   volumes:
+#     - name: gkm-cache
+#       persistentVolumeClaim:
+#         claimName: vllm-cache-mistral-small-3-1-24b-instruct-2503
+#   containers:
+#     - volumeMounts:
+#         - name: gkm-cache
+#           mountPath: /cache
+#       args:
+#         - "-cc.cache_dir=/cache"
+---
+apiVersion: gkm.io/v1alpha1
+kind: GKMCache
+metadata:
+  name: vllm-cache-mistral-small-3-1-24b-instruct-2503
+  labels:
+    app: gkm-vllm-cache
+    model: mistral-small-3-1-24b-instruct-2503
+    cache-type: torch-compile
+spec:
+  # OCI image produced by the GKM pipeline (task-cache-image-packager).
+  # Replace with your actual registry URL and tag from the pipeline output.
+  image: quay.io/your-org/gkm_cache_container:mistral-small-3-1-24b-instruct-2503-cuda-8-6

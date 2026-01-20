@@ -1,0 +1,14 @@
+Starting E2E functional tests ...
+Parallelism requested for pytest is 1
+============================= test session starts ==============================
+platform darwin -- Python 3.11.14, pytest-7.4.4, pluggy-1.6.0
+rootdir: /Users/fspolti/data/dev/sources/kserve/test/e2e
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-0.23.8, cov-5.0.0, xdist-3.8.0, httpx-0.30.0
+asyncio: mode=Mode.STRICT
+created: 1/1 worker
+1 worker [15 items]
+
+scheduling tests via WorkStealingScheduling
+
+batcher/test_raw_batcher.py::test_batcher_raw 

@@ -1,0 +1,467 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: isvc-cache-collector
+  labels:
+    app: gkm-cache-builder
+    task-type: cache-collection
+spec:
+  description: "Deploys a KServe InferenceService with vllm-cuda-runtime to produce and collect vLLM compilation cache"
+
+  params:
+  - name: model-name
+    type: string
+    description: "Model identifier: HuggingFace name (org/model) or OCI URI (oci://registry/image:tag)"
+  - name: model-name-clean
+    type: string
+    description: "Label-safe model name (lowercase, no slashes, max 63 chars)"
+  - name: model-revision
+    type: string
+    default: "main"
+    description: "Model revision (only used for HuggingFace models)"
+  - name: max-model-len
+    type: string
+    default: "2048"
+  - name: gpu-compute-cap
+    type: string
+    description: "GPU compute capability from environment detection"
+  - name: serving-runtime
+    type: string
+    default: "vllm-cuda-runtime"
+    description: "Name of the ServingRuntime to use for the InferenceService"
+
+  workspaces:
+  - name: cache
+    description: "Cache workspace for storing compilation artifacts"
+
+  stepTemplate:
+    resources:
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+
+  steps:
+  - name: create-cache-pvc
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      MODEL_CLEAN="$(params.model-name-clean)"
+      PVC_NAME="vllm-cache-pvc-${MODEL_CLEAN}"
+
+      echo "=== Creating Cache PVC ==="
+      echo "PVC Name: $PVC_NAME"
+
+      cat <<EOF | oc apply -f -
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: ${PVC_NAME}
+        labels:
+          app: gkm-cache-builder
+          model: "${MODEL_CLEAN}"
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+      EOF
+
+      echo "PVC $PVC_NAME created successfully"
+
+      # Store PVC name for later steps
+      echo "$PVC_NAME" > /workspace/cache/pvc-name.txt
+      echo "$MODEL_CLEAN" > /workspace/cache/model-clean.txt
+
+  - name: create-isvc
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      MODEL_NAME="$(params.model-name)"
+      MODEL_REVISION="$(params.model-revision)"
+      MAX_MODEL_LEN="$(params.max-model-len)"
+      SERVING_RUNTIME="$(params.serving-runtime)"
+      PVC_NAME=$(cat /workspace/cache/pvc-name.txt)
+      MODEL_CLEAN=$(cat /workspace/cache/model-clean.txt)
+
+      # ISVC name must be short enough that KServe-generated labels stay
+      # within the 63-char limit. KServe creates labels like:
+      #   isvc.<name>-predictor   (adds 5 + 10 = 15 chars)
+      # So the ISVC name must be <= 48 chars.
+      ISVC_NAME="cc-${MODEL_CLEAN}"
+      # Truncate to 48 chars (safety margin for KServe label generation)
+      ISVC_NAME=$(echo "$ISVC_NAME" | cut -c1-48 | sed 's/-$//')
+
+      # Determine storageUri based on model-name format
+      if echo "$MODEL_NAME" | grep -q "^oci://"; then
+        STORAGE_URI="$MODEL_NAME"
+        echo "Model source: OCI ModelCar image"
+      elif echo "$MODEL_NAME" | grep -q "^hf://"; then
+        STORAGE_URI="$MODEL_NAME"
+        echo "Model source: HuggingFace (explicit URI)"
+      else
+        STORAGE_URI="hf://${MODEL_NAME}"
+        echo "Model source: HuggingFace (auto-prefixed)"
+      fi
+
+      echo "=== Creating InferenceService ==="
+      echo "ISVC Name: $ISVC_NAME"
+      echo "Model: $MODEL_NAME"
+      echo "Storage URI: $STORAGE_URI"
+      echo "Max Model Len: $MAX_MODEL_LEN"
+      echo "ServingRuntime: $SERVING_RUNTIME"
+      echo "Cache PVC: $PVC_NAME"
+
+      # Generate ISVC YAML dynamically based on model source
+      if echo "$STORAGE_URI" | grep -q "^oci://"; then
+        # OCI ModelCar: no --revision flag
+        cat <<EOF | oc apply -f -
+      apiVersion: serving.kserve.io/v1beta1
+      kind: InferenceService
+      metadata:
+        name: ${ISVC_NAME}
+        labels:
+          app: gkm-cache-builder
+          model: "${MODEL_CLEAN}"
+        annotations:
+          serving.kserve.io/disableIngressCreation: "true"
+          serving.kserve.io/autoscalerClass: "external"
+      spec:
+        predictor:
+          model:
+            runtime: ${SERVING_RUNTIME}
+            modelFormat:
+              name: vLLM
+            storageUri: "${STORAGE_URI}"
+            args:
+            - "--max-model-len"
+            - "${MAX_MODEL_LEN}"
+            - "--compilation-config"
+            - '{"level": 3, "cache_dir": "/mnt/cache"}'
+            - "--gpu-memory-utilization"
+            - "0.8"
+            - "--trust-remote-code"
+            - "--disable-log-stats"
+            resources:
+              limits:
+                nvidia.com/gpu: "1"
+              requests:
+                nvidia.com/gpu: "1"
+            volumeMounts:
+            - name: cache-volume
+              mountPath: /mnt/cache
+          volumes:
+          - name: cache-volume
+            persistentVolumeClaim:
+              claimName: ${PVC_NAME}
+      EOF
+      else
+        # HuggingFace: include --revision flag
+        cat <<EOF | oc apply -f -
+      apiVersion: serving.kserve.io/v1beta1
+      kind: InferenceService
+      metadata:
+        name: ${ISVC_NAME}
+        labels:
+          app: gkm-cache-builder
+          model: "${MODEL_CLEAN}"
+        annotations:
+          serving.kserve.io/disableIngressCreation: "true"
+          serving.kserve.io/autoscalerClass: "external"
+      spec:
+        predictor:
+          model:
+            runtime: ${SERVING_RUNTIME}
+            modelFormat:
+              name: vLLM
+            storageUri: "${STORAGE_URI}"
+            args:
+            - "--revision"
+            - "${MODEL_REVISION}"
+            - "--max-model-len"
+            - "${MAX_MODEL_LEN}"
+            - "--compilation-config"
+            - '{"level": 3, "cache_dir": "/mnt/cache"}'
+            - "--gpu-memory-utilization"
+            - "0.8"
+            - "--trust-remote-code"
+            - "--disable-log-stats"
+            resources:
+              limits:
+                nvidia.com/gpu: "1"
+              requests:
+                nvidia.com/gpu: "1"
+            volumeMounts:
+            - name: cache-volume
+              mountPath: /mnt/cache
+          volumes:
+          - name: cache-volume
+            persistentVolumeClaim:
+              claimName: ${PVC_NAME}
+      EOF
+      fi
+
+      echo "InferenceService $ISVC_NAME created successfully"
+
+      # Store ISVC name for later steps
+      echo "$ISVC_NAME" > /workspace/cache/isvc-name.txt
+
+  - name: wait-for-isvc-ready
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      ISVC_NAME=$(cat /workspace/cache/isvc-name.txt)
+      NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+      echo "=== Waiting for InferenceService Ready ==="
+      echo "ISVC: $ISVC_NAME"
+      echo "Namespace: $NAMESPACE"
+
+      MAX_WAIT=2700  # 45 minutes
+      ELAPSED=0
+      ISVC_READY=false
+
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        # Get ISVC status
+        READY_STATUS=$(oc get inferenceservice "$ISVC_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "Unknown")
+
+        if [ "$READY_STATUS" = "True" ]; then
+          ISVC_READY=true
+          break
+        fi
+
+        # Log progress every 30 seconds
+        if [ $((ELAPSED % 30)) -eq 0 ]; then
+          REASON=$(oc get inferenceservice "$ISVC_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}' 2>/dev/null || echo "Unknown")
+          MESSAGE=$(oc get inferenceservice "$ISVC_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || echo "")
+          echo "[${ELAPSED}s] Ready=$READY_STATUS Reason=$REASON $MESSAGE"
+        fi
+
+        sleep 10
+        ELAPSED=$((ELAPSED + 10))
+      done
+
+      if [ "$ISVC_READY" != "true" ]; then
+        echo "ERROR: InferenceService $ISVC_NAME did not become ready within ${MAX_WAIT}s"
+        echo "=== ISVC Status ==="
+        oc get inferenceservice "$ISVC_NAME" -o yaml 2>/dev/null || true
+        echo "=== Predictor Pod Logs ==="
+        PREDICTOR_POD=$(oc get pods -l "serving.kserve.io/inferenceservice=${ISVC_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$PREDICTOR_POD" ]; then
+          oc logs "$PREDICTOR_POD" -c kserve-container --tail=100 2>/dev/null || true
+        fi
+        exit 1
+      fi
+
+      echo "InferenceService $ISVC_NAME is Ready"
+
+      # Record the start time for metadata
+      date +%s > /workspace/cache/compilation-start.txt
+    timeout: 50m
+
+  - name: warmup-and-collect
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      ISVC_NAME=$(cat /workspace/cache/isvc-name.txt)
+      MODEL_NAME="$(params.model-name)"
+
+      echo "=== Locating Predictor Pod ==="
+      PREDICTOR_POD=$(oc get pods -l "serving.kserve.io/inferenceservice=${ISVC_NAME}" -o jsonpath='{.items[0].metadata.name}')
+      POD_IP=$(oc get pod "$PREDICTOR_POD" -o jsonpath='{.status.podIP}')
+
+      echo "Predictor Pod: $PREDICTOR_POD"
+      echo "Pod IP: $POD_IP"
+
+      # Extract vLLM startup timing from predictor pod logs
+      echo "=== Extracting vLLM Startup Timing ==="
+      VLLM_LOGS=$(oc logs "$PREDICTOR_POD" -c kserve-container 2>/dev/null || echo "")
+
+      # Get container start and ready timestamps from pod status
+      CONTAINER_STARTED=$(oc get pod "$PREDICTOR_POD" -o jsonpath='{.status.containerStatuses[?(@.name=="kserve-container")].state.running.startedAt}' 2>/dev/null || echo "")
+      ISVC_READY_TIME=$(oc get inferenceservice "$(cat /workspace/cache/isvc-name.txt)" -o jsonpath='{.status.conditions[?(@.type=="Ready")].lastTransitionTime}' 2>/dev/null || echo "")
+
+      STARTUP_SECONDS=""
+      if [ -n "$CONTAINER_STARTED" ] && [ -n "$ISVC_READY_TIME" ]; then
+        START_EPOCH=$(date -d "$CONTAINER_STARTED" +%s 2>/dev/null || echo "")
+        READY_EPOCH=$(date -d "$ISVC_READY_TIME" +%s 2>/dev/null || echo "")
+        if [ -n "$START_EPOCH" ] && [ -n "$READY_EPOCH" ]; then
+          STARTUP_SECONDS=$((READY_EPOCH - START_EPOCH))
+        fi
+      fi
+
+      # Extract key timing lines from vLLM logs
+      echo "--- vLLM Startup Log Highlights ---"
+      echo "$VLLM_LOGS" | grep -iE "(loading model|model weights|torch.compile|compilation|startup|elapsed|init_process_group|ready|served|started)" | tail -20 || true
+      echo "---"
+
+      if [ -n "$STARTUP_SECONDS" ]; then
+        echo "vLLM first startup time (container start to ISVC ready): ${STARTUP_SECONDS}s"
+      else
+        echo "Warning: Could not calculate startup time from pod/ISVC timestamps"
+        STARTUP_SECONDS="0"
+      fi
+
+      echo "$STARTUP_SECONDS" > /workspace/cache/vllm-startup-seconds.txt
+
+      # Save full vLLM logs for reference
+      echo "$VLLM_LOGS" > /workspace/cache/vllm-startup-logs.txt
+
+      # Determine the model name as seen by vLLM
+      # For OCI models, vLLM uses the mount path; query the /v1/models endpoint to get it
+      echo "=== Detecting Served Model Name ==="
+      SERVED_MODEL=""
+      for attempt in 1 2 3; do
+        SERVED_MODEL=$(curl -s --max-time 30 "http://${POD_IP}:8080/v1/models" 2>/dev/null | \
+          grep -o '"id" *: *"[^"]*"' | head -1 | sed 's/"id" *: *"//;s/"//' || echo "")
+        if [ -n "$SERVED_MODEL" ]; then
+          break
+        fi
+        echo "  Attempt $attempt: waiting for model list..."
+        sleep 5
+      done
+
+      if [ -z "$SERVED_MODEL" ]; then
+        echo "Warning: Could not detect served model name, using model-name param"
+        SERVED_MODEL="$MODEL_NAME"
+      fi
+      echo "Served model name: $SERVED_MODEL"
+
+      # Send warmup requests via pod IP
+      echo "=== Sending Warmup Requests ==="
+      for i in 1 2 3; do
+        echo "  Sending warmup request $i/3..."
+        curl -s --max-time 120 -X POST "http://${POD_IP}:8080/v1/completions" \
+          -H "Content-Type: application/json" \
+          -d "{\"model\": \"$SERVED_MODEL\", \"prompt\": \"Explain how compilation caching works in $i sentences.\", \"max_tokens\": 64}" \
+          > /dev/null 2>&1 || echo "  Warning: warmup request $i failed (non-critical)"
+        sleep 2
+      done
+      echo "Warmup complete"
+
+      # Copy cache from predictor pod to workspace
+      echo "=== Collecting Cache from Predictor Pod ==="
+      mkdir -p /workspace/cache/vllm_cache/torch_compile_cache
+
+      oc cp "${PREDICTOR_POD}:/mnt/cache" /workspace/cache/vllm_cache/torch_compile_cache/ -c kserve-container
+
+      echo "=== Cache Collection Summary ==="
+      CACHE_DIR="/workspace/cache/vllm_cache/torch_compile_cache"
+      CACHE_FILES=$(find "$CACHE_DIR" -type f | wc -l)
+      CACHE_SIZE_BYTES=$(du -sb "$CACHE_DIR" 2>/dev/null | cut -f1 || echo "0")
+      CACHE_SIZE_MB=$((CACHE_SIZE_BYTES / 1024 / 1024))
+
+      echo "Cache files: $CACHE_FILES"
+      echo "Cache size: ${CACHE_SIZE_MB} MB"
+
+      if [ "$CACHE_FILES" -eq 0 ]; then
+        echo "ERROR: No cache files were collected"
+        echo "Checking predictor pod cache directory:"
+        oc exec "$PREDICTOR_POD" -c kserve-container -- ls -la /mnt/cache/ 2>/dev/null || true
+        exit 1
+      fi
+
+      echo "Cache structure:"
+      find "$CACHE_DIR" -maxdepth 3 -type d | sort
+
+      # Store metrics for metadata step
+      echo "$CACHE_FILES" > /workspace/cache/cache-files-count.txt
+      echo "$CACHE_SIZE_MB" > /workspace/cache/cache-size-mb.txt
+      echo "$CACHE_SIZE_BYTES" > /workspace/cache/cache-size-bytes.txt
+
+      # Extract vLLM version from predictor pod
+      echo "=== Extracting vLLM Version ==="
+      VLLM_VERSION=$(oc exec "$PREDICTOR_POD" -c kserve-container -- python3 -c "import vllm; print(vllm.__version__)" 2>/dev/null || echo "unknown")
+      echo "vLLM version: $VLLM_VERSION"
+      echo "$VLLM_VERSION" > /workspace/cache/vllm-version.txt
+
+      # Extract model architecture from model config.json
+      echo "=== Extracting Model Architecture ==="
+      MODEL_ARCH=$(oc exec "$PREDICTOR_POD" -c kserve-container -- \
+        python3 -c "import json,glob,os;files=[f for p in ['/mnt/models','/mnt/cache','/models'] for f in glob.glob(os.path.join(p,'**','config.json'),recursive=True)];[print(json.load(open(f)).get('architectures',[''])[0] or json.load(open(f)).get('model_type','')) or exit() for f in files[:5] if 'architectures' in json.load(open(f)) or 'model_type' in json.load(open(f))]" \
+        2>/dev/null || echo "unknown")
+      echo "Model architecture: $MODEL_ARCH"
+      echo "$MODEL_ARCH" > /workspace/cache/model-architecture.txt
+
+      # GPU environment info is already available in the shared workspace
+      # from the detect-gpu-environment task (gpu-environment.json)
+      if [ -f /workspace/cache/gpu-environment.json ]; then
+        echo "=== GPU Environment (from detect-gpu-environment task) ==="
+        cat /workspace/cache/gpu-environment.json
+      else
+        echo "Warning: gpu-environment.json not found in shared workspace"
+      fi
+
+  - name: write-cache-metadata
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      CACHE_DIR="/workspace/cache/vllm_cache/torch_compile_cache"
+      MODEL_NAME="$(params.model-name)"
+      MODEL_REVISION="$(params.model-revision)"
+      GPU_COMPUTE_CAP="$(params.gpu-compute-cap)"
+      CACHE_FILES=$(cat /workspace/cache/cache-files-count.txt)
+      CACHE_SIZE_MB=$(cat /workspace/cache/cache-size-mb.txt)
+      VLLM_STARTUP_SECONDS=$(cat /workspace/cache/vllm-startup-seconds.txt 2>/dev/null || echo "0")
+      BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+      echo "=== Writing Cache Metadata ==="
+
+      MODEL_CLEAN=$(cat /workspace/cache/model-clean.txt)
+
+      cat > "${CACHE_DIR}/cache_metadata.json" <<EOF
+      {
+        "model_name": "${MODEL_CLEAN}",
+        "model_source": "${MODEL_NAME}",
+        "model_revision": "${MODEL_REVISION}",
+        "cache_size_mb": ${CACHE_SIZE_MB},
+        "cache_files_count": ${CACHE_FILES},
+        "gpu_compute_cap": "${GPU_COMPUTE_CAP}",
+        "build_timestamp": "${BUILD_TIMESTAMP}",
+        "cache_method": "isvc-cache-collector",
+        "compilation_level": 3,
+        "vllm_first_startup_seconds": ${VLLM_STARTUP_SECONDS}
+      }
+      EOF
+
+      echo "Cache metadata written to ${CACHE_DIR}/cache_metadata.json"
+      cat "${CACHE_DIR}/cache_metadata.json"
+
+  - name: cleanup
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      # Best-effort cleanup - do not use set -e
+
+      ISVC_NAME=$(cat /workspace/cache/isvc-name.txt 2>/dev/null || echo "")
+      PVC_NAME=$(cat /workspace/cache/pvc-name.txt 2>/dev/null || echo "")
+
+      echo "=== Cleanup ==="
+
+      if [ -n "$ISVC_NAME" ]; then
+        echo "Deleting InferenceService $ISVC_NAME..."
+        oc delete inferenceservice "$ISVC_NAME" --ignore-not-found=true 2>/dev/null || echo "Warning: Failed to delete ISVC $ISVC_NAME"
+      fi
+
+      if [ -n "$PVC_NAME" ]; then
+        echo "Waiting for ISVC pod to terminate before deleting PVC..."
+        sleep 10
+        echo "Deleting PVC $PVC_NAME..."
+        oc delete pvc "$PVC_NAME" --ignore-not-found=true 2>/dev/null || echo "Warning: Failed to delete PVC $PVC_NAME"
+      fi
+
+      echo "Cleanup complete"
+      echo "Note: If cleanup failed, look for resources with label app=gkm-cache-builder"

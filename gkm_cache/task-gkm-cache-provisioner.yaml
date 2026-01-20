@@ -1,0 +1,136 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: gkm-cache-provisioner
+  labels:
+    app: gkm-cache-builder
+    task-type: provisioning
+spec:
+  description: "Creates a GKMCache CR to provision the cache PVC"
+
+  params:
+  - name: model-name
+    type: string
+    description: "Model identifier"
+  - name: model-name-clean
+    type: string
+    description: "Label-safe model name (lowercase, no slashes, max 63 chars)"
+    default: ""
+  - name: cache-image-url
+    type: string
+    description: "Full URL of the cache OCI image (from package-cache-image task)"
+  - name: target-gpu-arch
+    type: string
+    description: "GPU architecture (for labeling)"
+  - name: gkmcache-namespace
+    type: string
+    default: ""
+    description: "Namespace for the GKMCache CR. Defaults to the pipeline's namespace."
+
+  steps:
+  - name: create-gkmcache
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "=== Creating GKMCache CR ==="
+
+      MODEL_NAME="$(params.model-name)"
+      MODEL_NAME_CLEAN="$(params.model-name-clean)"
+      CACHE_IMAGE_URL="$(params.cache-image-url)"
+      TARGET_GPU_ARCH="$(params.target-gpu-arch)"
+
+      # Generate a DNS-safe name from model-name-clean (handles long OCI URIs)
+      if [ -n "$MODEL_NAME_CLEAN" ]; then
+        CR_NAME="vllm-cache-${MODEL_NAME_CLEAN}"
+      else
+        CR_NAME="vllm-cache-$(echo "$MODEL_NAME" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')"
+      fi
+
+      # Determine namespace
+      NAMESPACE="$(params.gkmcache-namespace)"
+      if [ -z "$NAMESPACE" ]; then
+        NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || echo "default")
+      fi
+
+      echo "GKMCache CR name: $CR_NAME"
+      echo "Namespace: $NAMESPACE"
+      echo "Cache image: $CACHE_IMAGE_URL"
+
+      # Check if a GKMCache with this name already exists
+      if oc get gkmcache "$CR_NAME" -n "$NAMESPACE" > /dev/null 2>&1; then
+        echo "GKMCache '$CR_NAME' already exists. Updating image reference..."
+        oc patch gkmcache "$CR_NAME" -n "$NAMESPACE" --type=merge \
+          -p "{\"spec\":{\"image\":\"$CACHE_IMAGE_URL\"}}"
+        echo "Updated GKMCache image to: $CACHE_IMAGE_URL"
+      else
+        echo "Creating new GKMCache CR..."
+        oc apply -f - <<EOF
+      apiVersion: gkm.io/v1alpha1
+      kind: GKMCache
+      metadata:
+        name: $CR_NAME
+        namespace: $NAMESPACE
+        labels:
+          app: gkm-vllm-cache
+          model: ${MODEL_NAME_CLEAN:-$(echo "$MODEL_NAME" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-63)}
+          cache-type: torch-compile
+          gpu-arch: $TARGET_GPU_ARCH
+          created-by: gkm-cache-pipeline
+      spec:
+        image: $CACHE_IMAGE_URL
+      EOF
+        echo "GKMCache CR created"
+      fi
+
+      # Wait for the PVC to be created by GKM
+      echo "Waiting for GKM to provision PVC '$CR_NAME'..."
+      MAX_WAIT=300  # 5 minutes
+      ELAPSED=0
+      PVC_READY=false
+
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        PVC_STATUS=$(oc get pvc "$CR_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+        if [ "$PVC_STATUS" = "Bound" ]; then
+          PVC_READY=true
+          break
+        fi
+        sleep 5
+        ELAPSED=$((ELAPSED + 5))
+        if [ $((ELAPSED % 30)) -eq 0 ]; then
+          echo "  PVC status: $PVC_STATUS (${ELAPSED}s elapsed)"
+        fi
+      done
+
+      if [ "$PVC_READY" = "true" ]; then
+        PVC_SIZE=$(oc get pvc "$CR_NAME" -n "$NAMESPACE" -o jsonpath='{.status.capacity.storage}' 2>/dev/null)
+        echo "PVC '$CR_NAME' is Bound (size: $PVC_SIZE)"
+      else
+        echo "WARNING: PVC '$CR_NAME' is not Bound after ${MAX_WAIT}s (status: $PVC_STATUS)"
+        echo "The GKMCache CR was created successfully. GKM may still be extracting the image."
+        echo "Check status with: oc get gkmcache $CR_NAME -n $NAMESPACE"
+      fi
+
+      # Write results
+      echo -n "$CR_NAME" > $(results.gkmcache-name.path)
+      echo -n "$NAMESPACE" > $(results.gkmcache-namespace.path)
+
+      echo ""
+      echo "=== GKMCache Summary ==="
+      echo "CR Name:   $CR_NAME"
+      echo "Namespace: $NAMESPACE"
+      echo "Image:     $CACHE_IMAGE_URL"
+      echo ""
+      echo "To use with KServe InferenceService:"
+      echo "  storageUris:"
+      echo "    - uri: \"pvc://$CR_NAME\""
+      echo "      mountPath: \"/mnt/models/cache\""
+      echo "  args:"
+      echo "    - \"-cc.cache_dir=/mnt/models/cache\""
+
+  results:
+  - name: gkmcache-name
+    description: "Name of the created GKMCache CR (also the PVC name)"
+  - name: gkmcache-namespace
+    description: "Namespace of the GKMCache CR"

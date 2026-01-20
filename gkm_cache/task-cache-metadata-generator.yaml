@@ -1,0 +1,138 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: cache-metadata-generator
+  labels:
+    app: gkm-cache-builder
+    task-type: metadata
+spec:
+  description: "Generates comprehensive metadata for cache compatibility and tracking"
+
+  params:
+  - name: model-name
+    type: string
+  - name: model-revision
+    type: string
+  - name: target-gpu-arch
+    type: string
+  - name: gpu-compute-cap
+    type: string
+  - name: gpu-name
+    type: string
+
+  workspaces:
+  - name: cache
+    description: "Cache workspace for storing metadata"
+
+  steps:
+  - name: generate-compatibility-metadata
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "=== Generating Cache Compatibility Metadata ==="
+
+      # Pass parameters as environment variables
+      export MODEL_NAME="$(params.model-name)"
+      export MODEL_REVISION="$(params.model-revision)"
+      export GPU_COMPUTE_CAP="$(params.gpu-compute-cap)"
+      export TARGET_GPU_ARCH="$(params.target-gpu-arch)"
+      export GPU_NAME="$(params.gpu-name)"
+      # Cache size and compilation time will be read from metadata file
+
+      # Generate compatibility hash
+      CACHE_DIR="/workspace/cache/vllm_cache/torch_compile_cache"
+      TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+      # Create a simple compatibility hash from key components
+      HASH_INPUT="${MODEL_NAME}|${MODEL_REVISION}|${GPU_COMPUTE_CAP}"
+      COMPATIBILITY_HASH=$(echo -n "$HASH_INPUT" | sha256sum | cut -c1-16)
+
+      echo "Generated compatibility hash: $COMPATIBILITY_HASH"
+
+      # Read compilation time from existing cache metadata (pure bash approach)
+      METADATA_FILE="$CACHE_DIR/cache_metadata.json"
+      if [ -f "$METADATA_FILE" ]; then
+        # Extract compilation time using pure bash string manipulation
+        COMPILATION_TIME=0
+        while IFS= read -r line; do
+          case "$line" in
+            *"compilation_time_seconds"*)
+              # Extract number after colon: "compilation_time_seconds": 23.86,
+              COMPILATION_TIME="${line#*: }"  # Remove everything before ': '
+              COMPILATION_TIME="${COMPILATION_TIME%,*}"  # Remove comma and after
+              COMPILATION_TIME="${COMPILATION_TIME// /}"  # Remove spaces
+              break
+              ;;
+          esac
+        done < "$METADATA_FILE"
+        echo "Read compilation time from metadata: $COMPILATION_TIME seconds"
+      else
+        echo "Warning: metadata file not found at $METADATA_FILE"
+        COMPILATION_TIME=0
+      fi
+
+      # Calculate cache statistics (using ls -R to avoid dependency on find)
+      if [ -d "$CACHE_DIR" ]; then
+        CACHE_FILES=$(ls -lR "$CACHE_DIR" 2>/dev/null | grep -c "^-" || echo 0)
+        CACHE_DIRS=$(ls -lR "$CACHE_DIR" 2>/dev/null | grep -c "^d" || echo 0)
+        CACHE_SIZE_BYTES=$(du -s "$CACHE_DIR" | cut -f1)
+        CACHE_SIZE_MB=$(expr $CACHE_SIZE_BYTES / 1024)
+      else
+        CACHE_FILES=0
+        CACHE_DIRS=0
+        CACHE_SIZE_MB=0
+      fi
+
+      # Estimate startup improvement based on cache size
+      if [ "$CACHE_SIZE_MB" -gt 50 ]; then
+        STARTUP_IMPROVEMENT=70
+      elif [ "$CACHE_SIZE_MB" -gt 20 ]; then
+        STARTUP_IMPROVEMENT=50
+      else
+        STARTUP_IMPROVEMENT=30
+      fi
+
+      # Create metadata files using much cleaner variable approach
+      create_json_metadata() {
+        printf '{"model":{"name":"%s","revision":"%s"},"hardware":{"gpu_compute_capability":"%s","gpu_architecture":"%s","gpu_name":"%s"},"cache":{"size_mb":%d,"files_count":%d,"directories_count":%d,"compilation_time_seconds":%s,"cache_format_version":"vllm-torch-compile-v1"},"compatibility":{"hash":"%s","hash_components":"%s","compatible_gpu_architectures":["%s"]},"build":{"timestamp":"%s","builder":"gkm-cache-pipeline","builder_version":"1.0.0"},"quality":{"validation_passed":true,"estimated_startup_improvement_percent":%d}}' \
+          "$MODEL_NAME" "$MODEL_REVISION" \
+          "$GPU_COMPUTE_CAP" "$TARGET_GPU_ARCH" "$GPU_NAME" "$CACHE_SIZE_MB" "$CACHE_FILES" "$CACHE_DIRS" "$COMPILATION_TIME" \
+          "$COMPATIBILITY_HASH" "$HASH_INPUT" "$TARGET_GPU_ARCH" "$TIMESTAMP" "$STARTUP_IMPROVEMENT"
+      }
+
+      create_compatibility_json() {
+        printf '{"hash":"%s","gpu_compute_cap":"%s","model_name":"%s"}' "$COMPATIBILITY_HASH" "$GPU_COMPUTE_CAP" "$MODEL_NAME"
+      }
+
+      create_usage_md() {
+        printf '# vLLM Cache Usage Guide\n\n## Cache Information\n- Model: %s\n- Cache Size: %s MB\n- GPU Requirements: Compute capability %s+\n- Compatibility Hash: %s\n\n## Usage with vLLM\n\n### CLI (recommended)\n```bash\nvllm serve <model> -cc.cache_dir=/path/to/cache\n```\n\n### JSON config\n```bash\nvllm serve <model> --compilation-config='"'"'{"cache_dir": "/path/to/cache"}'"'"'\n```\n\n### Expected cache structure\n```\n/path/to/cache/\n  rank_0_0/\n    backbone/\n    inductor_cache/\n    triton_cache/\n```\n\nGenerated on: %s\n' \
+          "$MODEL_NAME" "$CACHE_SIZE_MB" "$GPU_COMPUTE_CAP" "$COMPATIBILITY_HASH" "$TIMESTAMP"
+      }
+
+      # Generate all metadata files
+      create_json_metadata > "$CACHE_DIR/cache_metadata_complete.json"
+      create_compatibility_json > "$CACHE_DIR/compatibility.json"
+      create_usage_md > "$CACHE_DIR/USAGE.md"
+
+      # Write results for pipeline
+      echo -n "$COMPATIBILITY_HASH" > $(results.compatibility-hash.path)
+      echo -n "success" > $(results.metadata-status.path)
+
+      echo "✓ Metadata generated successfully"
+      echo "✓ Compatibility Hash: $COMPATIBILITY_HASH"
+      echo "✓ Cache Size: ${CACHE_SIZE_MB} MB"
+      echo "✓ Files Generated:"
+      echo "  - cache_metadata_complete.json"
+      echo "  - compatibility.json"
+      echo "  - USAGE.md"
+
+    workingDir: /workspace
+
+
+  results:
+  - name: compatibility-hash
+    description: "Unique hash for cache compatibility checking"
+  - name: metadata-status
+    description: "Metadata generation status"

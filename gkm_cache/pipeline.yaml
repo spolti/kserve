@@ -1,0 +1,267 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: vllm-cache-builder
+  labels:
+    app: gkm-cache-builder
+    version: v1.0.0
+  annotations:
+    description: "Pipeline for building and distributing vLLM compilation caches"
+spec:
+  # ============================================================================
+  # Pipeline Parameters
+  #
+  # WHY TWO MODEL PARAMETERS (model-name vs model-name-clean)?
+  #
+  #   model-name:       The REAL model identifier passed to vLLM. This can be a
+  #                     long OCI URI like "oci://registry.redhat.io/rhelai1/
+  #                     modelcar-mistral-small-3-1-24b-instruct-2503-quantized-
+  #                     w4a16:1.5" or a HuggingFace path like "mistralai/
+  #                     Mistral-Small-3.1-24B-Instruct-2503".
+  #
+  #   model-name-clean: A SHORT, SAFE version of the model name used everywhere
+  #                     Kubernetes requires DNS-compatible names:
+  #                       - Tekton task labels (max 63 chars, no slashes)
+  #                       - GKMCache CR names (must be DNS-1123 subdomain)
+  #                       - PVC names (derived from GKMCache CR name)
+  #                       - OCI image tags (no slashes, no colons except tag)
+  #                       - InferenceService names
+  #
+  #   We can't auto-derive model-name-clean from model-name reliably because:
+  #     - OCI URIs contain registry host, org, image name, and tag
+  #     - HuggingFace paths contain org/model with mixed case
+  #     - Simple slug transformations produce ugly or ambiguous names
+  #     - The user knows best which short name identifies their model
+  #
+  #   Example:
+  #     model-name:       oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5
+  #     model-name-clean: mistral-small-3-1-24b-instruct-2503
+  #
+  # ============================================================================
+  params:
+  - name: model-name
+    type: string
+    description: >-
+      The full model identifier passed to vLLM's --model flag. This is the
+      actual model reference that vLLM uses to load weights. Accepts two formats:
+        - OCI ModelCar URI: oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5
+        - HuggingFace path: mistralai/Mistral-Small-3.1-24B-Instruct-2503
+
+  - name: model-name-clean
+    type: string
+    description: >-
+      A short, DNS-safe version of the model name (lowercase, no slashes,
+      max 63 chars). This is NOT passed to vLLM - it is used only for naming
+      Kubernetes resources: GKMCache CR, PVC, OCI image tag, Tekton labels,
+      and InferenceService. Must be manually set because auto-deriving a
+      meaningful short name from long OCI URIs is unreliable.
+      Example: "mistral-small-3-1-24b-instruct-2503"
+
+  - name: model-revision
+    type: string
+    default: "main"
+    description: >-
+      Git branch or tag for the model. Only used with HuggingFace models
+      (ignored for OCI ModelCar images, which are versioned by their image tag).
+
+  - name: target-gpu-arch
+    type: string
+    default: ""
+    description: >-
+      Target GPU architecture (e.g., cuda-8.6, cuda-9.0). Leave empty (default)
+      to auto-detect from cluster GPU hardware. If specified, the pipeline
+      validates it matches the detected hardware and fails with a clear error
+      on mismatch. The cache is ONLY valid for this exact GPU architecture.
+
+  - name: registry-url
+    type: string
+    description: >-
+      Container registry URL where the cache OCI image will be pushed.
+      Example: quay.io/yourorg. The image will be pushed as
+      <registry-url>/gkm_cache_container:<tag>.
+
+  - name: max-model-len
+    type: string
+    default: "2048"
+    description: >-
+      Maximum sequence (context) length passed to vLLM during cache building
+      (--max-model-len). Controls which CUDA kernel shapes get compiled and
+      how much GPU memory is used. The compiled cache covers requests up to
+      this length; longer requests trigger on-the-fly compilation. Use 2048
+      for testing (16GB GPU), 4096 for general use (24GB), 8192+ for
+      long-context workloads (40GB+).
+
+  - name: cache-tag
+    type: string
+    default: ""
+    description: >-
+      Custom OCI image tag for the cache image. If empty (default), the tag
+      is auto-generated from model-name-clean and target-gpu-arch, e.g.,
+      "mistral-small-3-1-24b-instruct-2503-cuda-8-6".
+
+  - name: registry-secret
+    type: string
+    default: "registry-push-secret"
+    description: >-
+      Name of the Kubernetes docker-registry secret containing credentials
+      to push the cache image. Must be type kubernetes.io/dockerconfigjson.
+      Create with: oc create secret docker-registry <name> --docker-server=...
+      Then link: oc secrets link buildah-sa <name> --for=mount
+
+  - name: serving-runtime-template
+    type: string
+    default: "vllm-cuda-runtime-template"
+    description: >-
+      Name of the ServingRuntime template in the redhat-ods-applications
+      namespace. The pipeline instantiates this template to create a
+      ServingRuntime in the current namespace, then uses it for cache
+      collection. This ensures the cache is built with the exact same vLLM
+      image that will serve the model in production.
+
+  - name: mcv-image
+    type: string
+    default: "quay.io/gkm/mcv:latest"
+    description: >-
+      OCI image containing the GKM MCV (Model Cache Vault) binary.
+      MCV packages vLLM compilation caches into OCI-compliant images with
+      auto-detected metadata. Build from Containerfile.mcv if no pre-built
+      image is available. See https://github.com/redhat-et/GKM/blob/main/mcv/README.md
+
+  - name: cosign-secret
+    type: string
+    default: "cosign-signing-key"
+    description: >-
+      Name of a Kubernetes secret containing a cosign private key for signing
+      the cache image. The secret must contain 'cosign.key' and optionally
+      'cosign.password'. If the secret does not exist, keyless signing via
+      Sigstore Fulcio + Rekor is used automatically.
+
+  workspaces:
+  - name: shared-ws
+    description: "Shared workspace for all pipeline operations including source, cache, and artifacts"
+
+  tasks:
+  # Task 1: Pre-flight Checks (operators, CRDs, ServingRuntime)
+  - name: preflight-check
+    taskRef:
+      name: preflight-check
+    params:
+    - name: serving-runtime-template
+      value: "$(params.serving-runtime-template)"
+
+  # Task 2: Environment Detection and Validation
+  - name: detect-gpu-environment
+    taskRef:
+      name: gpu-environment-detector
+    runAfter: ["preflight-check"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: target-gpu-arch
+      value: "$(params.target-gpu-arch)"
+    workspaces:
+    - name: source
+      workspace: shared-ws
+    - name: cache
+      workspace: shared-ws
+
+  # Task 3: ISVC-Based Cache Collection
+  - name: isvc-cache-collector
+    taskRef:
+      name: isvc-cache-collector
+    runAfter: ["detect-gpu-environment"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-name-clean
+      value: "$(params.model-name-clean)"
+    - name: model-revision
+      value: "$(params.model-revision)"
+    - name: max-model-len
+      value: "$(params.max-model-len)"
+    - name: gpu-compute-cap
+      value: "$(tasks.detect-gpu-environment.results.gpu-compute-cap)"
+    - name: serving-runtime
+      value: "$(tasks.preflight-check.results.serving-runtime-name)"
+    workspaces:
+    - name: cache
+      workspace: shared-ws
+
+  # Task 4: Generate Cache Metadata
+  - name: generate-metadata
+    taskRef:
+      name: cache-metadata-generator
+    runAfter: ["isvc-cache-collector"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-revision
+      value: "$(params.model-revision)"
+    - name: target-gpu-arch
+      value: "$(tasks.detect-gpu-environment.results.gpu-arch)"
+    - name: gpu-compute-cap
+      value: "$(tasks.detect-gpu-environment.results.gpu-compute-cap)"
+    - name: gpu-name
+      value: "$(tasks.detect-gpu-environment.results.gpu-name)"
+    workspaces:
+    - name: cache
+      workspace: shared-ws
+
+  # Task 5: Package as OCI Image
+  - name: package-cache-image
+    taskRef:
+      name: cache-image-packager
+    runAfter: ["generate-metadata"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-name-clean
+      value: "$(params.model-name-clean)"
+    - name: model-revision
+      value: "$(params.model-revision)"
+    - name: target-gpu-arch
+      value: "$(tasks.detect-gpu-environment.results.gpu-arch)"
+    - name: registry-url
+      value: "$(params.registry-url)"
+    - name: cache-tag
+      value: "$(params.cache-tag)"
+    - name: gpu-compute-cap
+      value: "$(tasks.detect-gpu-environment.results.gpu-compute-cap)"
+    - name: registry-secret
+      value: "$(params.registry-secret)"
+    - name: mcv-image
+      value: "$(params.mcv-image)"
+    - name: cosign-secret
+      value: "$(params.cosign-secret)"
+    workspaces:
+    - name: cache
+      workspace: shared-ws
+
+  # Task 6: Create GKMCache CR to provision cache PVC
+  - name: provision-gkm-cache
+    taskRef:
+      name: gkm-cache-provisioner
+    runAfter: ["package-cache-image"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-name-clean
+      value: "$(params.model-name-clean)"
+    - name: cache-image-url
+      value: "$(tasks.package-cache-image.results.full-image-url)"
+    - name: target-gpu-arch
+      value: "$(tasks.detect-gpu-environment.results.gpu-arch)"
+
+  results:
+  - name: cache-image-url
+    description: "Full URL of the built cache image"
+    value: "$(tasks.package-cache-image.results.full-image-url)"
+  - name: cache-image-digest
+    description: "SHA256 digest of the cache image"
+    value: "$(tasks.package-cache-image.results.image-digest)"
+  - name: compatibility-hash
+    description: "Compatibility hash for cache matching"
+    value: "$(tasks.generate-metadata.results.compatibility-hash)"
+  - name: gkmcache-name
+    description: "Name of the GKMCache CR / PVC"
+    value: "$(tasks.provision-gkm-cache.results.gkmcache-name)"

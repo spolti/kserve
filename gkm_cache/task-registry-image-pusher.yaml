@@ -1,0 +1,321 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: registry-image-pusher
+  labels:
+    app: gkm-cache-builder
+    task-type: registry-operations
+spec:
+  description: "Pushes cache image to registry and manages metadata"
+
+  params:
+  - name: registry-url
+    type: string
+    description: "Container registry URL"
+  - name: image-tag
+    type: string
+    description: "Image tag from packaging step"
+  - name: image-digest
+    type: string
+    description: "Image digest from build step"
+
+  workspaces:
+  - name: registry
+    description: "Registry workspace with credentials and config"
+
+  steps:
+  - name: verify-registry-access
+    image: registry.access.redhat.com/ubi9/ubi-micro:latest
+    script: |
+      #!/bin/sh
+      set -e
+
+      echo "=== Verifying Registry Access ==="
+
+      # Check if Docker config exists
+      DOCKER_CONFIG="/workspace/registry/.docker"
+      if [ ! -f "${DOCKER_CONFIG}/config.json" ]; then
+        echo "WARNING: No Docker config found at ${DOCKER_CONFIG}/config.json"
+        echo "Registry authentication may fail"
+      else
+        echo "✓ Docker config found"
+      fi
+
+      # Parse registry URL
+      REGISTRY_HOST=$(echo "$(params.registry-url)" | sed 's|^[^/]*//||' | sed 's|/.*||')
+      echo "Registry Host: ${REGISTRY_HOST}"
+
+      # Test basic connectivity (if possible)
+      if command -v nc >/dev/null 2>&1; then
+        if nc -z ${REGISTRY_HOST} 443 2>/dev/null; then
+          echo "✓ Registry ${REGISTRY_HOST} is reachable on port 443"
+        elif nc -z ${REGISTRY_HOST} 80 2>/dev/null; then
+          echo "✓ Registry ${REGISTRY_HOST} is reachable on port 80"
+        else
+          echo "WARNING: Registry ${REGISTRY_HOST} may not be reachable"
+        fi
+      fi
+
+
+  - name: verify-image-manifest
+    image: gcr.io/go-containerregistry/crane:latest
+    script: |
+      #!/bin/sh
+      set -e
+
+      echo "=== Verifying Image Manifest ==="
+
+      FULL_IMAGE_URL="$(params.registry-url)/gkm_cache_container:$(params.image-tag)"
+
+      # Set Docker config location
+      export DOCKER_CONFIG="/workspace/registry/.docker"
+
+      echo "Checking image: ${FULL_IMAGE_URL}"
+      echo "Image digest: $(params.image-digest)"
+
+      # Verify image exists and get manifest
+      if crane manifest "${FULL_IMAGE_URL}" > /tmp/manifest.json 2>/dev/null; then
+        echo "✓ Image manifest retrieved successfully"
+
+        # Extract manifest information
+        cat /tmp/manifest.json | head -20
+
+        # Get image config
+        if crane config "${FULL_IMAGE_URL}" > /tmp/config.json 2>/dev/null; then
+          echo "✓ Image config retrieved"
+
+          # Extract useful information from config
+          echo "=== Image Labels ==="
+          cat /tmp/config.json | grep -A 20 '"Labels"' || echo "No labels found"
+
+        else
+          echo "WARNING: Could not retrieve image config"
+        fi
+
+      else
+        echo "ERROR: Could not retrieve image manifest"
+        exit 1
+      fi
+
+    env:
+    - name: DOCKER_CONFIG
+      value: /workspace/registry/.docker
+
+  - name: tag-additional-versions
+    image: gcr.io/go-containerregistry/crane:latest
+    script: |
+      #!/bin/sh
+      set -e
+
+      echo "=== Creating Additional Image Tags ==="
+
+      export DOCKER_CONFIG="/workspace/registry/.docker"
+
+      REGISTRY_URL="$(params.registry-url)"
+      PRIMARY_TAG="$(params.image-tag)"
+      FULL_IMAGE_URL="${REGISTRY_URL}/gkm_cache_container:${PRIMARY_TAG}"
+
+      echo "Source image: ${FULL_IMAGE_URL}"
+
+      # Create additional tags for easier discovery
+      ADDITIONAL_TAGS=""
+
+      # Latest tag for this model
+      MODEL_NAME_CLEAN=$(echo "${PRIMARY_TAG}" | cut -d'-' -f1-2)  # Extract model part
+      LATEST_TAG="${MODEL_NAME_CLEAN}-latest"
+      ADDITIONAL_TAGS="${ADDITIONAL_TAGS} ${LATEST_TAG}"
+
+      # Version-specific tag (without revision)
+      VERSION_TAG=$(echo "${PRIMARY_TAG}" | sed 's/-[a-z0-9]\{7\}$//')  # Remove revision suffix
+      ADDITIONAL_TAGS="${ADDITIONAL_TAGS} ${VERSION_TAG}"
+
+      echo "Creating additional tags: ${ADDITIONAL_TAGS}"
+
+      for tag in ${ADDITIONAL_TAGS}; do
+        TARGET_URL="${REGISTRY_URL}/gkm_cache_container:${tag}"
+        echo "Creating tag: ${tag}"
+
+        if crane copy "${FULL_IMAGE_URL}" "${TARGET_URL}"; then
+          echo "✓ Successfully created tag: ${tag}"
+        else
+          echo "✗ Failed to create tag: ${tag}"
+        fi
+      done
+
+    env:
+    - name: DOCKER_CONFIG
+      value: /workspace/registry/.docker
+
+  - name: generate-registry-metadata
+    image: registry.access.redhat.com/ubi9/ubi-micro:latest
+    script: |
+      #!/bin/sh
+      set -e
+
+      echo "=== Generating Registry Metadata ==="
+
+      REGISTRY_URL="$(params.registry-url)"
+      IMAGE_TAG="$(params.image-tag)"
+      IMAGE_DIGEST="$(params.image-digest)"
+      FULL_IMAGE_URL="${REGISTRY_URL}/gkm_cache_container:${IMAGE_TAG}"
+      TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+      # Create comprehensive registry metadata using echo commands
+      echo "{" > /tmp/registry-metadata.json
+      echo "  \"registry\": {" >> /tmp/registry-metadata.json
+      echo "    \"url\": \"${REGISTRY_URL}\"," >> /tmp/registry-metadata.json
+      echo "    \"image_name\": \"gkm_cache_container\"," >> /tmp/registry-metadata.json
+      echo "    \"primary_tag\": \"${IMAGE_TAG}\"," >> /tmp/registry-metadata.json
+      echo "    \"full_url\": \"${FULL_IMAGE_URL}\"," >> /tmp/registry-metadata.json
+      echo "    \"digest\": \"${IMAGE_DIGEST}\"," >> /tmp/registry-metadata.json
+      echo "    \"push_timestamp\": \"${TIMESTAMP}\"" >> /tmp/registry-metadata.json
+      echo "  }," >> /tmp/registry-metadata.json
+      echo "  \"access\": {" >> /tmp/registry-metadata.json
+      echo "    \"pull_command\": \"docker pull ${FULL_IMAGE_URL}\"," >> /tmp/registry-metadata.json
+      echo "    \"oci_uri\": \"oci://${FULL_IMAGE_URL}\"," >> /tmp/registry-metadata.json
+      echo "    \"cosign_verify\": \"cosign verify ${FULL_IMAGE_URL}\"" >> /tmp/registry-metadata.json
+      echo "  }," >> /tmp/registry-metadata.json
+      echo "  \"integration\": {" >> /tmp/registry-metadata.json
+      echo "    \"kserve_storage_uri\": \"oci://${FULL_IMAGE_URL}\"," >> /tmp/registry-metadata.json
+      echo "    \"kubernetes_image_pull_policy\": \"IfNotPresent\"," >> /tmp/registry-metadata.json
+      echo "    \"recommended_mount_path\": \"/opt/vllm/cache\"" >> /tmp/registry-metadata.json
+      echo "  }," >> /tmp/registry-metadata.json
+      echo "  \"metadata\": {" >> /tmp/registry-metadata.json
+      echo "    \"type\": \"gkm-cache\"," >> /tmp/registry-metadata.json
+      echo "    \"format\": \"torch-compile-v1\"," >> /tmp/registry-metadata.json
+      echo "    \"compatible_frameworks\": [\"vllm\", \"pytorch\"]," >> /tmp/registry-metadata.json
+      echo "    \"cache_category\": \"gpu-kernel-compilation\"" >> /tmp/registry-metadata.json
+      echo "  }" >> /tmp/registry-metadata.json
+      echo "}" >> /tmp/registry-metadata.json
+
+      echo "Registry metadata generated:"
+      cat /tmp/registry-metadata.json
+
+      # Create pull verification script using echo commands
+      echo '#!/bin/bash' > /tmp/verify-pull.sh
+      echo 'set -e' >> /tmp/verify-pull.sh
+      echo '' >> /tmp/verify-pull.sh
+      echo 'IMAGE_URL="$1"' >> /tmp/verify-pull.sh
+      echo 'if [ -z "$IMAGE_URL" ]; then' >> /tmp/verify-pull.sh
+      echo '  echo "Usage: $0 <image-url>"' >> /tmp/verify-pull.sh
+      echo '  exit 1' >> /tmp/verify-pull.sh
+      echo 'fi' >> /tmp/verify-pull.sh
+      echo '' >> /tmp/verify-pull.sh
+      echo 'echo "=== Verifying Image Pull ==="' >> /tmp/verify-pull.sh
+      echo 'echo "Image: $IMAGE_URL"' >> /tmp/verify-pull.sh
+      echo '' >> /tmp/verify-pull.sh
+      echo '# Test pull' >> /tmp/verify-pull.sh
+      echo 'if docker pull "$IMAGE_URL"; then' >> /tmp/verify-pull.sh
+      echo '  echo "✓ Image pulled successfully"' >> /tmp/verify-pull.sh
+      echo '' >> /tmp/verify-pull.sh
+      echo '  # Test cache extraction' >> /tmp/verify-pull.sh
+      echo '  echo "=== Testing Cache Extraction ==="' >> /tmp/verify-pull.sh
+      echo '  CONTAINER_ID=$(docker create "$IMAGE_URL")' >> /tmp/verify-pull.sh
+      echo '  docker cp "$CONTAINER_ID:/opt/vllm/cache" /tmp/test-cache/' >> /tmp/verify-pull.sh
+      echo '  docker rm "$CONTAINER_ID"' >> /tmp/verify-pull.sh
+      echo '' >> /tmp/verify-pull.sh
+      echo '  if [ -d "/tmp/test-cache" ] && [ "$(ls -A /tmp/test-cache)" ]; then' >> /tmp/verify-pull.sh
+      echo '    echo "✓ Cache extracted successfully"' >> /tmp/verify-pull.sh
+      echo '    echo "Cache contents:"' >> /tmp/verify-pull.sh
+      echo '    ls -la /tmp/test-cache/ | head -10' >> /tmp/verify-pull.sh
+      echo '  else' >> /tmp/verify-pull.sh
+      echo '    echo "✗ Cache extraction failed"' >> /tmp/verify-pull.sh
+      echo '    exit 1' >> /tmp/verify-pull.sh
+      echo '  fi' >> /tmp/verify-pull.sh
+      echo '' >> /tmp/verify-pull.sh
+      echo '  # Cleanup' >> /tmp/verify-pull.sh
+      echo '  rm -rf /tmp/test-cache' >> /tmp/verify-pull.sh
+      echo '  echo "✓ Verification completed"' >> /tmp/verify-pull.sh
+      echo 'else' >> /tmp/verify-pull.sh
+      echo '  echo "✗ Image pull failed"' >> /tmp/verify-pull.sh
+      echo '  exit 1' >> /tmp/verify-pull.sh
+      echo 'fi' >> /tmp/verify-pull.sh
+
+      chmod +x /tmp/verify-pull.sh
+
+      # Save results for pipeline
+      mkdir -p /tmp/tekton-results
+      echo "${FULL_IMAGE_URL}" > /tmp/tekton-results/image-url
+      echo "${IMAGE_DIGEST}" > /tmp/tekton-results/image-digest
+      cp /tmp/registry-metadata.json /tmp/tekton-results/
+      cp /tmp/verify-pull.sh /tmp/tekton-results/
+
+      echo "✓ Registry metadata generated"
+      echo "✓ Image URL: ${FULL_IMAGE_URL}"
+      echo "✓ Image Digest: ${IMAGE_DIGEST}"
+
+
+  - name: generate-usage-examples
+    image: registry.access.redhat.com/ubi9/ubi-micro:latest
+    script: |
+      #!/bin/sh
+      set -e
+
+      echo "=== Generating Usage Examples ==="
+
+      FULL_IMAGE_URL="$(params.registry-url)/gkm_cache_container:$(params.image-tag)"
+
+      # Docker usage example using echo commands
+      echo '#!/bin/bash' > /tmp/docker-usage.sh
+      echo '# Docker Usage Example for vLLM Cache' >> /tmp/docker-usage.sh
+      echo '' >> /tmp/docker-usage.sh
+      echo '# 1. Pull the cache image' >> /tmp/docker-usage.sh
+      echo "docker pull ${FULL_IMAGE_URL}" >> /tmp/docker-usage.sh
+      echo '' >> /tmp/docker-usage.sh
+      echo '# 2. Extract cache to local directory' >> /tmp/docker-usage.sh
+      echo 'mkdir -p ./vllm-cache' >> /tmp/docker-usage.sh
+      echo "docker run --rm -v \$(pwd)/gkm_cache_container:/output ${FULL_IMAGE_URL} sh -c \"cp -r /opt/vllm/cache/* /output/\"" >> /tmp/docker-usage.sh
+      echo '' >> /tmp/docker-usage.sh
+      echo '# 3. Use with vLLM' >> /tmp/docker-usage.sh
+      echo 'docker run --gpus all \\' >> /tmp/docker-usage.sh
+      echo '  -v $(pwd)/gkm_cache_container:/cache \\' >> /tmp/docker-usage.sh
+      echo '  -p 8000:8000 \\' >> /tmp/docker-usage.sh
+      echo '  vllm/vllm-openai:latest \\' >> /tmp/docker-usage.sh
+      echo '  --model your-model-name \\' >> /tmp/docker-usage.sh
+      echo '  --compilation-config '"'"'{"level": 3, "cache_dir": "/cache"}'"'"'' >> /tmp/docker-usage.sh
+      echo '' >> /tmp/docker-usage.sh
+      echo 'echo "vLLM started with pre-built cache!"' >> /tmp/docker-usage.sh
+
+      # Kubernetes usage example using echo commands
+      echo '# Kubernetes Usage Example' > /tmp/kubernetes-usage.yaml
+      echo 'apiVersion: v1' >> /tmp/kubernetes-usage.yaml
+      echo 'kind: Pod' >> /tmp/kubernetes-usage.yaml
+      echo 'metadata:' >> /tmp/kubernetes-usage.yaml
+      echo '  name: vllm-with-cache' >> /tmp/kubernetes-usage.yaml
+      echo 'spec:' >> /tmp/kubernetes-usage.yaml
+      echo '  initContainers:' >> /tmp/kubernetes-usage.yaml
+      echo '  - name: cache-extractor' >> /tmp/kubernetes-usage.yaml
+      echo "    image: ${FULL_IMAGE_URL}" >> /tmp/kubernetes-usage.yaml
+      echo '    command: ["sh", "-c"]' >> /tmp/kubernetes-usage.yaml
+      echo '    args: ["cp -r /opt/vllm/cache/* /shared-cache/"]' >> /tmp/kubernetes-usage.yaml
+      echo '    volumeMounts:' >> /tmp/kubernetes-usage.yaml
+      echo '    - name: cache-volume' >> /tmp/kubernetes-usage.yaml
+      echo '      mountPath: /shared-cache' >> /tmp/kubernetes-usage.yaml
+      echo '  containers:' >> /tmp/kubernetes-usage.yaml
+      echo '  - name: vllm-server' >> /tmp/kubernetes-usage.yaml
+      echo '    image: vllm/vllm-openai:latest' >> /tmp/kubernetes-usage.yaml
+      echo '    args: ["--model", "your-model-name", "--compilation-config", "{\"level\": 3, \"cache_dir\": \"/cache\"}"]' >> /tmp/kubernetes-usage.yaml
+      echo '    volumeMounts:' >> /tmp/kubernetes-usage.yaml
+      echo '    - name: cache-volume' >> /tmp/kubernetes-usage.yaml
+      echo '      mountPath: /cache' >> /tmp/kubernetes-usage.yaml
+      echo '    resources:' >> /tmp/kubernetes-usage.yaml
+      echo '      limits:' >> /tmp/kubernetes-usage.yaml
+      echo '        nvidia.com/gpu: 1' >> /tmp/kubernetes-usage.yaml
+      echo '  volumes:' >> /tmp/kubernetes-usage.yaml
+      echo '  - name: cache-volume' >> /tmp/kubernetes-usage.yaml
+      echo '    emptyDir: {}' >> /tmp/kubernetes-usage.yaml
+
+      chmod +x /tmp/docker-usage.sh
+
+      echo "✓ Usage examples generated:"
+      echo "  - /tmp/docker-usage.sh"
+      echo "  - /tmp/kubernetes-usage.yaml"
+
+
+  results:
+  - name: image-url
+    description: "Final image URL in registry"
+  - name: image-digest
+    description: "SHA256 digest of pushed image"
+  - name: push-status
+    description: "Push operation status"

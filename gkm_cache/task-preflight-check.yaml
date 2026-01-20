@@ -1,0 +1,133 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: preflight-check
+  labels:
+    app: gkm-cache-builder
+    task-type: validation
+spec:
+  description: "Verifies required operators, instantiates the chosen ServingRuntime template, and validates the environment"
+
+  params:
+  - name: serving-runtime-template
+    type: string
+    default: "vllm-cuda-runtime-template"
+    description: "Name of the ServingRuntime template to instantiate (from redhat-ods-applications namespace)"
+
+  results:
+  - name: serving-runtime-name
+    description: "Name of the instantiated ServingRuntime"
+
+  stepTemplate:
+    resources:
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+
+  steps:
+  - name: check-operators
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "=== Pre-flight Checks ==="
+
+      # Check for ODH or RHOAI operator
+      echo "Checking for Open Data Hub or Red Hat OpenShift AI operator..."
+      ODH_CSV=$(oc get csv --all-namespaces -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -i -E 'opendatahub|rhods' | head -1 || true)
+
+      if [ -z "$ODH_CSV" ]; then
+        echo "ERROR: Neither Open Data Hub (ODH) nor Red Hat OpenShift AI (RHOAI) operator is installed."
+        echo "One of these operators is required to manage InferenceServices and ServingRuntimes."
+        echo ""
+        echo "Install one of:"
+        echo "  - Red Hat OpenShift AI (RHOAI) from OperatorHub"
+        echo "  - Open Data Hub (ODH) from OperatorHub"
+        exit 1
+      fi
+      echo "Found operator: $ODH_CSV"
+
+      # Check for KServe CRDs
+      echo "Checking for KServe CRDs..."
+      if ! oc get crd inferenceservices.serving.kserve.io > /dev/null 2>&1; then
+        echo "ERROR: KServe CRD 'inferenceservices.serving.kserve.io' not found."
+        echo "KServe must be installed and configured by the ODH/RHOAI operator."
+        exit 1
+      fi
+      echo "KServe CRDs present"
+
+      if ! oc get crd servingruntimes.serving.kserve.io > /dev/null 2>&1; then
+        echo "ERROR: KServe CRD 'servingruntimes.serving.kserve.io' not found."
+        exit 1
+      fi
+      echo "ServingRuntime CRDs present"
+
+      # Check for GKM operator
+      echo "Checking for GKM operator..."
+      if ! oc get crd gkmcaches.gkm.io > /dev/null 2>&1; then
+        echo "ERROR: GKMCache CRD (gkmcaches.gkm.io) not found."
+        echo ""
+        echo "The GKM operator must be installed before running this pipeline."
+        echo "Install it from the GKM repository:"
+        echo "  git clone https://github.com/redhat-et/GKM.git && cd GKM && make deploy"
+        echo ""
+        echo "Prerequisites: cert-manager must be installed first."
+        exit 1
+      fi
+      echo "GKM CRDs present"
+
+      echo "=== Operator checks passed ==="
+
+  - name: instantiate-serving-runtime
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      TEMPLATE_NAME="$(params.serving-runtime-template)"
+      NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+      TEMPLATES_NS="redhat-ods-applications"
+
+      echo "=== ServingRuntime Setup ==="
+      echo "Selected template: $TEMPLATE_NAME"
+
+      # List available templates for the user
+      echo ""
+      echo "Available ServingRuntime templates in $TEMPLATES_NS:"
+      oc get templates -n "$TEMPLATES_NS" -o custom-columns='NAME:.metadata.name,DESCRIPTION:.metadata.annotations.description' --no-headers 2>/dev/null || true
+      echo ""
+
+      # Validate the selected template exists
+      if ! oc get template "$TEMPLATE_NAME" -n "$TEMPLATES_NS" > /dev/null 2>&1; then
+        echo "ERROR: Template '$TEMPLATE_NAME' not found in namespace $TEMPLATES_NS."
+        echo ""
+        echo "Available templates:"
+        oc get templates -n "$TEMPLATES_NS" -o custom-columns='NAME:.metadata.name' --no-headers 2>/dev/null || true
+        exit 1
+      fi
+
+      # Extract the ServingRuntime name from the template
+      RUNTIME_NAME=$(oc get template "$TEMPLATE_NAME" -n "$TEMPLATES_NS" -o jsonpath='{.objects[0].metadata.name}')
+      echo "ServingRuntime name from template: $RUNTIME_NAME"
+
+      # Check if already exists in this namespace
+      if oc get servingruntime "$RUNTIME_NAME" -n "$NAMESPACE" > /dev/null 2>&1; then
+        echo "ServingRuntime '$RUNTIME_NAME' already exists in namespace $NAMESPACE, skipping creation"
+      else
+        echo "Instantiating template '$TEMPLATE_NAME' into namespace $NAMESPACE..."
+        oc process "$TEMPLATE_NAME" -n "$TEMPLATES_NS" | oc apply -n "$NAMESPACE" -f -
+        echo "ServingRuntime '$RUNTIME_NAME' created successfully"
+      fi
+
+      # Verify it's available
+      oc get servingruntime "$RUNTIME_NAME" -n "$NAMESPACE"
+
+      # Write result
+      echo -n "$RUNTIME_NAME" | tee $(results.serving-runtime-name.path)
+
+      echo ""
+      echo "=== ServingRuntime setup complete ==="
