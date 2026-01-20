@@ -12,7 +12,7 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-release
-    appstudio.openshift.io/component: kserve-router
+    appstudio.openshift.io/component: kserve-router-ci
     pipelines.appstudio.openshift.io/type: build
   name: kserve-router-on-push
   namespace: open-data-hub-tenant
