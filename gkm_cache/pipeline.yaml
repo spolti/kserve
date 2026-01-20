@@ -1,0 +1,170 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: vllm-cache-builder
+  labels:
+    app: gkm-cache-builder
+    version: v1.0.0
+  annotations:
+    description: "Pipeline for building and distributing vLLM compilation caches"
+spec:
+  params:
+  - name: model-name
+    type: string
+    description: "Model identifier: HuggingFace name (e.g., meta-llama/Llama-2-7b-hf) or OCI URI (e.g., oci://registry.redhat.io/rhelai1/modelcar-granite-3-1-8b-lab-v1:1.4)"
+  - name: model-name-clean
+    type: string
+    description: "Label-safe model name (lowercase, no slashes, max 63 chars). Used for resource naming."
+  - name: model-revision
+    type: string
+    default: "main"
+    description: "Model revision/branch to use"
+  - name: target-gpu-arch
+    type: string
+    description: "Target GPU architecture (e.g., cuda-8.6, cuda-9.0). Leave empty for auto-detection."
+    default: ""
+  - name: registry-url
+    type: string
+    description: "Container registry URL for cache images"
+  - name: max-model-len
+    type: string
+    default: "2048"
+    description: "Maximum model length for cache building"
+  - name: cache-tag
+    type: string
+    default: ""
+    description: "Custom tag for cache image (auto-generated if empty)"
+  - name: registry-secret
+    type: string
+    default: "registry-push-secret"
+    description: "Name of the Kubernetes docker-registry secret for pushing cache images"
+  - name: serving-runtime-template
+    type: string
+    default: "vllm-cuda-runtime-template"
+    description: "ServingRuntime template name from redhat-ods-applications namespace"
+
+  workspaces:
+  - name: shared-ws
+    description: "Shared workspace for all pipeline operations including source, cache, and artifacts"
+
+  tasks:
+  # Task 1: Pre-flight Checks (operators, CRDs, ServingRuntime)
+  - name: preflight-check
+    taskRef:
+      name: preflight-check
+    params:
+    - name: serving-runtime-template
+      value: "$(params.serving-runtime-template)"
+
+  # Task 2: Environment Detection and Validation
+  - name: detect-gpu-environment
+    taskRef:
+      name: gpu-environment-detector
+    runAfter: ["preflight-check"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: target-gpu-arch
+      value: "$(params.target-gpu-arch)"
+    workspaces:
+    - name: source
+      workspace: shared-ws
+    - name: cache
+      workspace: shared-ws
+
+  # Task 3: ISVC-Based Cache Collection
+  - name: isvc-cache-collector
+    taskRef:
+      name: isvc-cache-collector
+    runAfter: ["detect-gpu-environment"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-name-clean
+      value: "$(params.model-name-clean)"
+    - name: model-revision
+      value: "$(params.model-revision)"
+    - name: max-model-len
+      value: "$(params.max-model-len)"
+    - name: gpu-compute-cap
+      value: "$(tasks.detect-gpu-environment.results.gpu-compute-cap)"
+    - name: serving-runtime
+      value: "$(tasks.preflight-check.results.serving-runtime-name)"
+    workspaces:
+    - name: cache
+      workspace: shared-ws
+
+  # Task 4: Generate Cache Metadata
+  - name: generate-metadata
+    taskRef:
+      name: cache-metadata-generator
+    runAfter: ["isvc-cache-collector"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-revision
+      value: "$(params.model-revision)"
+    - name: target-gpu-arch
+      value: "$(tasks.detect-gpu-environment.results.gpu-arch)"
+    - name: gpu-compute-cap
+      value: "$(tasks.detect-gpu-environment.results.gpu-compute-cap)"
+    - name: gpu-name
+      value: "$(tasks.detect-gpu-environment.results.gpu-name)"
+    workspaces:
+    - name: cache
+      workspace: shared-ws
+
+  # Task 5: Package as OCI Image
+  - name: package-cache-image
+    taskRef:
+      name: cache-image-packager
+    runAfter: ["generate-metadata"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-name-clean
+      value: "$(params.model-name-clean)"
+    - name: model-revision
+      value: "$(params.model-revision)"
+    - name: target-gpu-arch
+      value: "$(tasks.detect-gpu-environment.results.gpu-arch)"
+    - name: registry-url
+      value: "$(params.registry-url)"
+    - name: cache-tag
+      value: "$(params.cache-tag)"
+    - name: gpu-compute-cap
+      value: "$(tasks.detect-gpu-environment.results.gpu-compute-cap)"
+    - name: registry-secret
+      value: "$(params.registry-secret)"
+    workspaces:
+    - name: cache
+      workspace: shared-ws
+
+  # Task 6: Create GKMCache CR to provision cache PVC
+  - name: provision-gkm-cache
+    taskRef:
+      name: gkm-cache-provisioner
+    runAfter: ["package-cache-image"]
+    params:
+    - name: model-name
+      value: "$(params.model-name)"
+    - name: model-name-clean
+      value: "$(params.model-name-clean)"
+    - name: cache-image-url
+      value: "$(tasks.package-cache-image.results.full-image-url)"
+    - name: target-gpu-arch
+      value: "$(tasks.detect-gpu-environment.results.gpu-arch)"
+
+  results:
+  - name: cache-image-url
+    description: "Full URL of the built cache image"
+    value: "$(tasks.package-cache-image.results.full-image-url)"
+  - name: cache-image-digest
+    description: "SHA256 digest of the cache image"
+    value: "$(tasks.package-cache-image.results.image-digest)"
+  - name: compatibility-hash
+    description: "Compatibility hash for cache matching"
+    value: "$(tasks.generate-metadata.results.compatibility-hash)"
+  - name: gkmcache-name
+    description: "Name of the GKMCache CR / PVC"
+    value: "$(tasks.provision-gkm-cache.results.gkmcache-name)"

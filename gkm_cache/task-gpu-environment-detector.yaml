@@ -1,0 +1,176 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: gpu-environment-detector
+  labels:
+    app: gkm-cache-builder
+    task-type: environment-detection
+spec:
+  description: "Detects GPU environment and validates compatibility for cache building"
+
+  params:
+  - name: model-name
+    type: string
+    description: "Model name for compatibility checking"
+  - name: target-gpu-arch
+    type: string
+    default: ""
+    description: "Optional target GPU architecture. If empty, will be auto-detected."
+
+  workspaces:
+  - name: source
+    description: "Source workspace for logging"
+  - name: cache
+    description: "Cache workspace for sharing with subsequent tasks"
+
+  stepTemplate:
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        memory: "4Gi"
+        cpu: "2"
+      requests:
+        nvidia.com/gpu: "1"
+        memory: "2Gi"
+        cpu: "1"
+
+  steps:
+  - name: detect-gpu-specs
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "=== GPU Environment Detection ==="
+      date
+      echo "Model: $(params.model-name)"
+
+      # nvidia-smi is injected by the NVIDIA device plugin when a GPU is allocated
+      if ! command -v nvidia-smi &> /dev/null; then
+        echo "ERROR: nvidia-smi not found. Ensure NVIDIA GPU device plugin is installed and GPU is allocated."
+        exit 1
+      fi
+
+      # Get detailed GPU information
+      echo "--- GPU Hardware Information ---"
+      nvidia-smi --query-gpu=name,compute_cap,memory.total,driver_version --format=csv,noheader,nounits
+
+      # Get CUDA version from nvidia-smi output
+      echo "--- CUDA Runtime Information ---"
+      nvidia-smi | grep "CUDA Version" || echo "CUDA version not detected from nvidia-smi"
+
+      # Extract specific values
+      GPU_COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader,nounits | head -1)
+      GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+      GPU_MEMORY=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
+
+      # Extract CUDA version from nvidia-smi output
+      CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9.]*\).*/\1/' || echo "unknown")
+      DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -1)
+
+      # Generate GPU architecture identifier
+      DETECTED_GPU_ARCH="cuda-$(echo $GPU_COMPUTE_CAP | tr '.' '-')"
+
+      # Handle auto-detection vs manual specification
+      TARGET_GPU_ARCH="$(params.target-gpu-arch)"
+
+      echo "--- GPU Architecture Validation ---"
+      echo "Detected GPU Architecture: $DETECTED_GPU_ARCH"
+
+      if [[ -z "$TARGET_GPU_ARCH" ]]; then
+        echo "No target GPU architecture specified - using auto-detected: $DETECTED_GPU_ARCH"
+        FINAL_GPU_ARCH="$DETECTED_GPU_ARCH"
+      else
+        echo "Target GPU Architecture (manual): $TARGET_GPU_ARCH"
+
+        if [[ "$TARGET_GPU_ARCH" == "$DETECTED_GPU_ARCH" ]]; then
+          echo "Target architecture matches detected architecture"
+          FINAL_GPU_ARCH="$TARGET_GPU_ARCH"
+        else
+          echo "ERROR: Target GPU architecture mismatch!"
+          echo "  Detected: $DETECTED_GPU_ARCH"
+          echo "  Specified: $TARGET_GPU_ARCH"
+          echo ""
+          echo "The specified target GPU architecture does not match the actual hardware."
+          echo "This would result in incompatible cache artifacts."
+          echo ""
+          echo "Solutions:"
+          echo "1. Remove the target-gpu-arch parameter to use auto-detection"
+          echo "2. Use the correct architecture: $DETECTED_GPU_ARCH"
+          echo "3. Use different hardware that matches: $TARGET_GPU_ARCH"
+          exit 1
+        fi
+      fi
+
+      # Use the validated architecture
+      GPU_ARCH="$FINAL_GPU_ARCH"
+
+      # Create compatibility hash
+      COMPATIBILITY_STRING="${GPU_COMPUTE_CAP}-${CUDA_VERSION}-$(params.model-name)"
+      COMPATIBILITY_HASH=$(echo -n "$COMPATIBILITY_STRING" | sha256sum | cut -d' ' -f1 | cut -c1-12)
+
+      echo "--- Extracted GPU Information ---"
+      echo "GPU Name: $GPU_NAME"
+      echo "Compute Capability: $GPU_COMPUTE_CAP"
+      echo "GPU Architecture: $GPU_ARCH"
+      echo "GPU Memory (MB): $GPU_MEMORY"
+      echo "CUDA Version: $CUDA_VERSION"
+      echo "Driver Version: $DRIVER_VERSION"
+      echo "Compatibility Hash: $COMPATIBILITY_HASH"
+
+      # Validate minimum requirements
+      echo "--- Requirement Validation ---"
+      MIN_MEMORY=8000  # 8GB minimum
+
+      if [ "$(echo "$GPU_MEMORY $MIN_MEMORY" | awk '{print ($1 < $2)}')" = "1" ]; then
+        echo "ERROR: Insufficient GPU memory. Required: ${MIN_MEMORY}MB, Available: ${GPU_MEMORY}MB"
+        exit 1
+      fi
+
+      # Check if GPU is supported for vLLM
+      if [[ "$GPU_COMPUTE_CAP" < "7.0" ]]; then
+        echo "ERROR: GPU compute capability $GPU_COMPUTE_CAP is too old. vLLM requires compute capability 7.0+"
+        exit 1
+      fi
+
+      # Create environment summary for next tasks
+      cat << EOF > /workspace/source/gpu-environment.json
+      {
+        "gpu_name": "$GPU_NAME",
+        "gpu_compute_cap": "$GPU_COMPUTE_CAP",
+        "gpu_arch": "$GPU_ARCH",
+        "gpu_memory_mb": $GPU_MEMORY,
+        "cuda_version": "$CUDA_VERSION",
+        "driver_version": "$DRIVER_VERSION",
+        "compatibility_hash": "$COMPATIBILITY_HASH",
+        "validation_passed": true,
+        "detection_timestamp": "$(date -Iseconds)"
+      }
+      EOF
+
+      echo "GPU environment detection completed successfully"
+
+      # Export results for Tekton
+      echo -n "$GPU_NAME" | tee $(results.gpu-name.path)
+      echo -n "$GPU_COMPUTE_CAP" | tee $(results.gpu-compute-cap.path)
+      echo -n "$GPU_ARCH" | tee $(results.gpu-arch.path)
+      echo -n "$GPU_MEMORY" | tee $(results.gpu-memory-mb.path)
+      echo -n "$CUDA_VERSION" | tee $(results.cuda-version.path)
+      echo -n "$DRIVER_VERSION" | tee $(results.driver-version.path)
+      echo -n "$COMPATIBILITY_HASH" | tee $(results.compatibility-hash.path)
+
+  results:
+  - name: gpu-name
+    description: "GPU model name (normalized)"
+  - name: gpu-compute-cap
+    description: "GPU compute capability (e.g., 8.6)"
+  - name: gpu-arch
+    description: "GPU architecture identifier (e.g., cuda-8-6)"
+  - name: gpu-memory-mb
+    description: "GPU memory in MB"
+  - name: cuda-version
+    description: "CUDA version"
+  - name: driver-version
+    description: "GPU driver version"
+  - name: compatibility-hash
+    description: "Unique hash for cache compatibility"
