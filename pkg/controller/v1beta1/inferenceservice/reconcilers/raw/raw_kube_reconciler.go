@@ -124,7 +124,6 @@ func NewRawKubeReconciler(ctx context.Context,
 
 	// TODO - Simplify the clients usage RHOAIENG-46606
 	depl, err := deployment.NewDeploymentReconciler(ctx, client, clientset, scheme, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec, deployConfig)
-
 	if err != nil {
 		return nil, err
 	}
