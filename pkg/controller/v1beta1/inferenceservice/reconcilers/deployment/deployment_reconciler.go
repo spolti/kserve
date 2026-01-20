@@ -74,7 +74,9 @@ func NewDeploymentReconciler(ctx context.Context,
 	podSpec *corev1.PodSpec, workerPodSpec *corev1.PodSpec,
 	deployConfig *v1beta1.DeployConfig,
 ) (*DeploymentReconciler, error) {
+
 	deploymentList, err := createRawDeploymentODH(ctx, client, clientset, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec, deployConfig)
+
 	if err != nil {
 		return nil, err
 	}
@@ -223,6 +225,7 @@ func createRawDefaultDeployment(componentMeta metav1.ObjectMeta,
 			},
 		},
 	}
+
 	if componentExt != nil && componentExt.DeploymentStrategy != nil {
 		// User-specified deployment strategy takes precedence
 		deployment.Spec.Strategy = *componentExt.DeploymentStrategy
@@ -231,6 +234,7 @@ func createRawDefaultDeployment(componentMeta metav1.ObjectMeta,
 		setDefaultDeploymentSpec(&deployment.Spec)
 		applyRolloutStrategyFromConfigmap(&deployment.Spec, deployConfig)
 	}
+
 	if componentExt != nil && componentExt.MinReplicas != nil && deployment.Annotations[constants.AutoscalerClass] == string(constants.AutoscalerClassNone) {
 		deployment.Spec.Replicas = ptr.To(*componentExt.MinReplicas)
 	}
@@ -353,6 +357,7 @@ func createRawWorkerDeployment(componentMeta metav1.ObjectMeta,
 			},
 		},
 	}
+
 	if componentExt != nil && componentExt.DeploymentStrategy != nil {
 		// User-specified deployment strategy takes precedence
 		deployment.Spec.Strategy = *componentExt.DeploymentStrategy
