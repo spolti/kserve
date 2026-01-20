@@ -1,0 +1,220 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: gkm-cache-provisioner
+  labels:
+    app: gkm-cache-builder
+    task-type: provisioning
+spec:
+  description: "Creates a GKMCache CR to provision the cache PVC"
+
+  params:
+  - name: model-name
+    type: string
+    description: "Model identifier"
+  - name: model-name-clean
+    type: string
+    description: "Label-safe model name (lowercase, no slashes, max 63 chars)"
+    default: ""
+  - name: cache-image-url
+    type: string
+    description: "Full URL of the cache OCI image (from package-cache-image task)"
+  - name: target-gpu-arch
+    type: string
+    description: "GPU architecture (for labeling)"
+  - name: storage-class-name
+    type: string
+    description: "StorageClass to use for the GKMCache PVC (e.g., gp3-csi, ocs-storagecluster-cephfs)"
+  - name: signature-format
+    type: string
+    default: "none"
+    description: "Cosign signature format: cosign-v2 (tag-based), cosign-v3 (OCI referrers), or none (unsigned)"
+  - name: target-namespace
+    type: string
+    description: "Namespace where the GKMCache CR will be created. This is the namespace where the production InferenceService will run."
+  - name: serving-runtime-template
+    type: string
+    default: "vllm-cuda-runtime-template"
+    description: "Name of the ServingRuntime template to instantiate in the target namespace"
+
+  steps:
+  - name: prepare-namespace
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      NAMESPACE="$(params.target-namespace)"
+      RUNTIME_TEMPLATE="$(params.serving-runtime-template)"
+
+      echo "=== Preparing target namespace: $NAMESPACE ==="
+
+      # Ensure namespace exists
+      if ! oc get namespace "$NAMESPACE" > /dev/null 2>&1; then
+        echo "Creating namespace '$NAMESPACE'..."
+        oc create namespace "$NAMESPACE"
+      else
+        echo "Namespace '$NAMESPACE' already exists"
+      fi
+
+      # GKM extraction init containers run as root (UID 0) and need the anyuid SCC.
+      # GKM uses the default SA for extraction pods, so we must temporarily grant
+      # anyuid to default. We revoke it after extraction completes so that
+      # production ISVC predictor pods run under restricted-v2 (required for
+      # OCI ModelCar to work correctly).
+      echo "Granting anyuid SCC to default SA (temporary, for GKM extraction)..."
+      oc adm policy add-scc-to-user anyuid -z default -n "$NAMESPACE"
+
+      # Instantiate the ServingRuntime if not already present
+      RUNTIME_NAME=$(echo "$RUNTIME_TEMPLATE" | sed 's/-template$//')
+      if oc get servingruntime "$RUNTIME_NAME" -n "$NAMESPACE" > /dev/null 2>&1; then
+        echo "ServingRuntime '$RUNTIME_NAME' already exists in '$NAMESPACE'"
+      else
+        echo "Creating ServingRuntime '$RUNTIME_NAME' in '$NAMESPACE'..."
+        oc process "$RUNTIME_TEMPLATE" -n redhat-ods-applications | oc apply -n "$NAMESPACE" -f -
+      fi
+
+      echo "--- Production Namespace '$NAMESPACE' configured ---"
+
+  - name: create-gkmcache
+    image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "=== Creating GKMCache CR ==="
+
+      MODEL_NAME="$(params.model-name)"
+      MODEL_NAME_CLEAN="$(params.model-name-clean)"
+      CACHE_IMAGE_URL="$(params.cache-image-url)"
+      TARGET_GPU_ARCH="$(params.target-gpu-arch)"
+      SIGNATURE_FORMAT="$(params.signature-format)"
+
+      # Generate a DNS-safe name from model-name-clean (handles long OCI URIs)
+      if [ -n "$MODEL_NAME_CLEAN" ]; then
+        CR_NAME="vllm-cache-${MODEL_NAME_CLEAN}"
+      else
+        CR_NAME="vllm-cache-$(echo "$MODEL_NAME" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')"
+      fi
+
+      NAMESPACE="$(params.target-namespace)"
+
+      echo "GKMCache CR name: $CR_NAME"
+      echo "Namespace: $NAMESPACE"
+      echo "Cache image: $CACHE_IMAGE_URL"
+
+      # Delete existing GKMCache if present to ensure a clean state
+      if oc get gkmcache "$CR_NAME" -n "$NAMESPACE" > /dev/null 2>&1; then
+        echo "GKMCache '$CR_NAME' already exists. Deleting for clean recreation..."
+        oc delete gkmcache "$CR_NAME" -n "$NAMESPACE" --wait=true --timeout=60s
+        # Wait for GKM to clean up associated PVCs and jobs
+        echo "Waiting for cleanup..."
+        sleep 10
+        echo "Previous GKMCache deleted"
+      fi
+
+      echo "Creating new GKMCache CR..."
+      oc apply -f - <<EOF
+      apiVersion: gkm.io/v1alpha1
+      kind: GKMCache
+      metadata:
+        name: $CR_NAME
+        namespace: $NAMESPACE
+        labels:
+          app: gkm-vllm-cache
+          model: ${MODEL_NAME_CLEAN:-$(echo "$MODEL_NAME" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-63)}
+          cache-type: torch-compile
+          gpu-arch: $TARGET_GPU_ARCH
+          created-by: gkm-cache-pipeline
+          gkm.io/signature-format: ${SIGNATURE_FORMAT}
+      spec:
+        image: $CACHE_IMAGE_URL
+        storageClassName: $(params.storage-class-name)
+      EOF
+      echo "GKMCache CR created"
+
+      # Wait for GKM to provision PVCs and complete extraction jobs.
+      # GKM creates PVCs with generated names (not the CR name), so we
+      # query by the cache-name label that GKM sets on every PVC it creates.
+      # GKM uses condition type "Extracted" (not "Ready") when cache extraction
+      # is complete on all nodes.
+      echo "Waiting for GKM to provision and populate cache PVCs..."
+      MAX_WAIT=600  # 10 minutes
+      ELAPSED=0
+      GKM_READY=false
+
+      while [ $ELAPSED -lt $MAX_WAIT ]; do
+        # Check the GKMCache CR status — GKM sets type=Extracted when done
+        EXTRACTED_STATUS=$(oc get gkmcache "$CR_NAME" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Extracted")].status}' 2>/dev/null || echo "")
+
+        if [ "$EXTRACTED_STATUS" = "True" ]; then
+          GKM_READY=true
+          break
+        fi
+
+        # Count PVCs created by GKM for this cache
+        PVC_COUNT=$(oc get pvc -n "$NAMESPACE" -l "cache-name=${CR_NAME}" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+
+        # Check extraction job completions using jsonpath for reliable parsing
+        JOBS_TOTAL=$(oc get jobs -n "$NAMESPACE" -l "cache-name=${CR_NAME}" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        JOBS_SUCCEEDED=$(oc get jobs -n "$NAMESPACE" -l "cache-name=${CR_NAME}" -o jsonpath='{range .items[*]}{.status.succeeded}{"\n"}{end}' 2>/dev/null | grep -c "1" || echo "0")
+
+        # Log progress every 30 seconds
+        if [ $((ELAPSED % 30)) -eq 0 ]; then
+          CR_REASON=$(oc get gkmcache "$CR_NAME" -n "$NAMESPACE" -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || echo "Unknown")
+          echo "  [${ELAPSED}s] GKMCache=$CR_REASON  PVCs=$PVC_COUNT  Jobs=${JOBS_SUCCEEDED}/${JOBS_TOTAL} completed"
+        fi
+
+        sleep 10
+        ELAPSED=$((ELAPSED + 10))
+      done
+
+      if [ "$GKM_READY" = "true" ]; then
+        echo "GKMCache '$CR_NAME' is Extracted (cache provisioned on all nodes)"
+        # List the PVCs created by GKM
+        echo "--- GKM-managed PVCs ---"
+        oc get pvc -n "$NAMESPACE" -l "cache-name=${CR_NAME}" -o custom-columns='NAME:.metadata.name,STATUS:.status.phase,NODE:.metadata.labels.node' --no-headers 2>/dev/null || true
+        echo "---"
+      else
+        echo "WARNING: GKMCache '$CR_NAME' is not Extracted after ${MAX_WAIT}s"
+        echo "--- GKMCache Status ---"
+        oc get gkmcache "$CR_NAME" -n "$NAMESPACE" -o jsonpath='{.status}' 2>/dev/null || true
+        echo ""
+        echo "--- GKM-managed PVCs ---"
+        oc get pvc -n "$NAMESPACE" -l "cache-name=${CR_NAME}" --no-headers 2>/dev/null || echo "(none)"
+        echo "--- Extraction Jobs ---"
+        oc get jobs -n "$NAMESPACE" -l "cache-name=${CR_NAME}" --no-headers 2>/dev/null || echo "(none)"
+        echo "---"
+        echo "GKMCache CR was created. GKM extraction may still be in progress."
+        echo "Check with: oc get gkmcache $CR_NAME -n $NAMESPACE"
+      fi
+
+      # Write results
+      echo -n "$CR_NAME" > $(results.gkmcache-name.path)
+      echo -n "$NAMESPACE" > $(results.gkmcache-namespace.path)
+
+      # Revoke anyuid from default SA now that extraction is complete.
+      # This restores restricted-v2 on default SA so OCI ModelCar works
+      # correctly for production InferenceService predictor pods.
+      echo "=== Revoking anyuid from default SA ==="
+      oc adm policy remove-scc-from-user anyuid -z default -n "$NAMESPACE" || echo "WARNING: Failed to revoke anyuid from default SA"
+      echo "default SA restored to restricted-v2"
+
+      echo ""
+      echo "=== GKMCache Summary ==="
+      echo "CR Name:   $CR_NAME"
+      echo "Namespace: $NAMESPACE"
+      echo "Image:     $CACHE_IMAGE_URL"
+      echo ""
+      echo "To use with KServe InferenceService:"
+      echo "  storageUris:"
+      echo "    - uri: \"pvc://$CR_NAME\""
+      echo "      mountPath: \"/mnt/cache\""
+      echo "  args:"
+      echo "    - \"-cc.cache_dir=/mnt/cache\""
+
+  results:
+  - name: gkmcache-name
+    description: "Name of the created GKMCache CR (also the PVC name)"
+  - name: gkmcache-namespace
+    description: "Namespace of the GKMCache CR"

@@ -1,0 +1,38 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: mistral-small-with-cache
+  labels:
+    app: gkm-cache-demo
+  annotations:
+    serving.kserve.io/autoscalerClass: "external"
+spec:
+  predictor:
+    model:
+      runtime: vllm-cuda-runtime
+      modelFormat:
+        name: vLLM
+      storageUri: "oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5"
+      args:
+      - "--max-model-len"
+      - "2048"
+      - "--compilation-config"
+      - '{"mode": 3, "cache_dir": "/mnt/cache/torch_compile_cache"}'
+      - "-cc.cache_dir"
+      - "/mnt/cache/torch_compile_cache"
+      - "--gpu-memory-utilization"
+      - "0.8"
+      - "--trust-remote-code"
+      - "--disable-log-stats"
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+        requests:
+          nvidia.com/gpu: "1"
+      volumeMounts:
+      - name: cache-volume
+        mountPath: /mnt/cache
+    volumes:
+    - name: cache-volume
+      persistentVolumeClaim:
+        claimName: vllm-cache-mistral-small-3-1-24b-instruct-2503-a449abfc # This needs to be updated once the GKM cache is created.
