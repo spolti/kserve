@@ -12,7 +12,7 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
-    appstudio.openshift.io/component: kserve-agent
+    appstudio.openshift.io/component: kserve-agent-ci
     pipelines.appstudio.openshift.io/type: build
   name: kserve-agent-on-push
   namespace: open-data-hub-tenant
