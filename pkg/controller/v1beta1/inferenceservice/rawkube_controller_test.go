@@ -78,8 +78,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 	}
 
@@ -373,6 +372,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-default.example.com",
 				"raw-foo-predictor-default.example.com", "")
+
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
@@ -806,6 +806,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-customized-default.example.com",
 				"raw-foo-customized-predictor-default.example.com", "")
+
 			// Check that the ISVC was updated
 			actualIsvc := &v1beta1.InferenceService{}
 			Eventually(func() bool {
@@ -1248,6 +1249,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-2-default.example.com",
 				"raw-foo-2-predictor-default.example.com", "")
+
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
@@ -1455,8 +1457,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 
@@ -3164,8 +3165,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 		ctx := context.Background()
@@ -4325,6 +4325,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "model.default.example.com",
 				"model-predictor.default.example.com", "")
+
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
@@ -4426,8 +4427,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 
@@ -5212,8 +5212,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 
@@ -5980,8 +5979,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 
@@ -6310,6 +6308,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-path-default.example.com",
 				"raw-foo-path-predictor-default.example.com", "")
+
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
@@ -6413,8 +6412,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 
@@ -7250,8 +7248,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 		}
 
@@ -8102,8 +8099,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				"cpuRequest": "100m",
 				"cpuLimit": "1",
 				"CaBundleConfigMapName": "",
-				"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-				"enableDirectPvcVolumeMount": false
+				"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
 			}`,
 			"opentelemetryCollector": `{
 				"scrapeInterval": "5s",
@@ -8547,6 +8543,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-predictor.default.svc.cluster.local",
 				"raw-foo-predictor-default.example.com", "")
+
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
@@ -9287,8 +9284,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
             		"cpuRequest": "100m",
             		"cpuLimit": "1",
             		"CaBundleConfigMapName": "",
-            		"caBundleVolumeMountPath": "/etc/ssl/custom-certs",
-            		"enableDirectPvcVolumeMount": false
+            		"caBundleVolumeMountPath": "/etc/ssl/custom-certs"
         		}`,
 			}
 			configMap := createInferenceServiceConfigMap(configs)

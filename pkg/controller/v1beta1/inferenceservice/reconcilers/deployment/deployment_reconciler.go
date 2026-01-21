@@ -74,7 +74,9 @@ func NewDeploymentReconciler(ctx context.Context,
 	podSpec *corev1.PodSpec, workerPodSpec *corev1.PodSpec,
 	deployConfig *v1beta1.DeployConfig,
 ) (*DeploymentReconciler, error) {
+
 	deploymentList, err := createRawDeploymentODH(ctx, client, clientset, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec, deployConfig)
+
 	if err != nil {
 		return nil, err
 	}
