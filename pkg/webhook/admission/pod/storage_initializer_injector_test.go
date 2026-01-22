@@ -17,7 +17,6 @@ limitations under the License.
 package pod
 
 import (
-	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -4708,7 +4707,7 @@ ls -la ${VERSIONED_DIR}
 			config: storageInitializerConfig,
 			client: c,
 		}
-		if err := injector.InjectStorageInitializer(context.TODO(), scenario.original); err != nil {
+		if err := injector.InjectStorageInitializer(t.Context(), scenario.original); err != nil {
 			t.Errorf("Test %q unexpected result: %s", name, err)
 		}
 		if diff, _ := kmp.SafeDiff(scenario.expected.Spec, scenario.original.Spec); diff != "" {
@@ -4776,7 +4775,7 @@ func TestOVMSAutoVersioningInvalidValues(t *testing.T) {
 				client: c,
 			}
 
-			err := injector.InjectStorageInitializer(context.TODO(), pod)
+			err := injector.InjectStorageInitializer(t.Context(), pod)
 			if scenario.expectError && err == nil {
 				t.Errorf("Expected error but got none")
 			}
@@ -4813,7 +4812,7 @@ func TestOVMSAutoVersioningIdempotency(t *testing.T) {
 	}
 
 	// First injection
-	err := injector.InjectStorageInitializer(context.TODO(), pod)
+	err := injector.InjectStorageInitializer(t.Context(), pod)
 	if err != nil {
 		t.Fatalf("First injection failed: %v", err)
 	}
@@ -4822,7 +4821,7 @@ func TestOVMSAutoVersioningIdempotency(t *testing.T) {
 	firstInjectionCount := len(pod.Spec.InitContainers)
 
 	// Second injection should be idempotent
-	err = injector.InjectStorageInitializer(context.TODO(), pod)
+	err = injector.InjectStorageInitializer(t.Context(), pod)
 	if err != nil {
 		t.Fatalf("Second injection failed: %v", err)
 	}
