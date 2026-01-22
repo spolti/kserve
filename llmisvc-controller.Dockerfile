@@ -25,4 +25,6 @@ RUN /opt/app-root/src/go/bin/go-licenses save --save_path third_party/library ./
 FROM gcr.io/distroless/static:nonroot
 COPY --from=builder /go/src/github.com/kserve/kserve/third_party /third_party
 COPY --from=builder /go/src/github.com/kserve/kserve/manager /
+
 ENTRYPOINT ["/manager"]
+
