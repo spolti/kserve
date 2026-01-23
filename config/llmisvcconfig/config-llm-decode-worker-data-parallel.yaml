@@ -15,7 +15,7 @@ spec:
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
-          runAsNonRoot: false
+          runAsNonRoot: true
           capabilities:
             drop:
               - ALL
@@ -27,7 +27,7 @@ spec:
           httpGet:
             path: /health
             port: 8000
-            scheme: HTTP
+            scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 10
@@ -36,7 +36,7 @@ spec:
           httpGet:
             path: /health
             port: 8000
-            scheme: HTTP
+            scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
@@ -46,13 +46,12 @@ spec:
           - "--vllm-port=8001"
           - "--connector=nixlv2"
           - "--secure-proxy=true"
-          # BackendTLSPolicy is not implemented yet so disable SSL for now
-          # - "--cert-path=/etc/ssl/certs"
-          # - "--decoder-use-tls=true"
-          # - "--decoder-tls-insecure-skip-verify=true"
-          # - "--prefiller-use-tls=true"
-          # - "--prefiller-tls-insecure-skip-verify=true"
-          # - "--enable-ssrf-protection=true"
+          - "--cert-path=/etc/ssl/certs"
+          - "--decoder-use-tls=true"
+          - "--decoder-tls-insecure-skip-verify=true"
+          - "--prefiller-use-tls=true"
+          - "--prefiller-tls-insecure-skip-verify=true"
+          - "--enable-ssrf-protection=true"
         volumeMounts:
           - mountPath: /etc/ssl/certs
             name: tls-certs
@@ -208,13 +207,12 @@ spec:
               --data-parallel-rpc-port {{ if .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
               --data-parallel-start-rank $START_RANK \
               ${VLLM_ADDITIONAL_ARGS} \
-              --trust-remote-code"
-              # BackendTLSPolicy is not implemented yet so disable SSL for now
-              # --enable-ssl-refresh \
-              # --ssl-certfile \
-              # /etc/ssl/certs/tls.crt \
-              # --ssl-keyfile \
-              # /etc/ssl/certs/tls.key"
+              --trust-remote-code \
+              --enable-ssl-refresh \
+              --ssl-certfile \
+              /etc/ssl/certs/tls.crt \
+              --ssl-keyfile \
+              /etc/ssl/certs/tls.key"
         env:
           - name: HOME
             value: /home
@@ -225,7 +223,7 @@ spec:
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: false
-          runAsNonRoot: false
+          runAsNonRoot: true
           capabilities:
             add:
               - "IPC_LOCK"
@@ -241,7 +239,7 @@ spec:
           httpGet:
             path: /health
             port: 8001
-            scheme: HTTP
+            scheme: HTTPS
           initialDelaySeconds: 300
           periodSeconds: 10
           timeoutSeconds: 10
@@ -250,7 +248,7 @@ spec:
           httpGet:
             path: /health
             port: 8001
-            scheme: HTTP
+            scheme: HTTPS
           initialDelaySeconds: 200
           periodSeconds: 30
           timeoutSeconds: 5
@@ -425,13 +423,12 @@ spec:
               --data-parallel-start-rank $START_RANK \
               ${VLLM_ADDITIONAL_ARGS} \
               --trust-remote-code \
-              --headless"
-              # BackendTLSPolicy is not implemented yet so disable SSL for now
-              # --enable-ssl-refresh \
-              # --ssl-certfile \
-              # /etc/ssl/certs/tls.crt \
-              # --ssl-keyfile \
-              # /etc/ssl/certs/tls.key"
+              --headless \
+              --enable-ssl-refresh \
+              --ssl-certfile \
+              /etc/ssl/certs/tls.crt \
+              --ssl-keyfile \
+              /etc/ssl/certs/tls.key"
         env:
           - name: HOME
             value: /home
@@ -444,7 +441,7 @@ spec:
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: false
-          runAsNonRoot: false
+          runAsNonRoot: true
           capabilities:
             add:
               - "IPC_LOCK"

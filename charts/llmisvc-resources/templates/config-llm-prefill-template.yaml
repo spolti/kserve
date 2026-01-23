@@ -22,12 +22,11 @@ spec:
             - --port
             - "8000"
             - --disable-log-requests
-            # BackendTLSPolicy is not implemented yet so disable SSL for now
-            # - --enable-ssl-refresh
-            # - --ssl-certfile
-            # - /etc/ssl/certs/tls.crt
-            # - --ssl-keyfile
-            # - /etc/ssl/certs/tls.key
+            - --enable-ssl-refresh
+            - --ssl-certfile
+            - /etc/ssl/certs/tls.crt
+            - --ssl-keyfile
+            - /etc/ssl/certs/tls.key
           env:
             - name: HOME
               value: /home
@@ -38,7 +37,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
-            runAsNonRoot: false
+            runAsNonRoot: true
             capabilities:
               drop:
                 - ALL
@@ -50,7 +49,7 @@ spec:
             httpGet:
               path: /health
               port: 8000
-              scheme: HTTP
+              scheme: HTTPS
             initialDelaySeconds: 120
             periodSeconds: 10
             timeoutSeconds: 10
@@ -59,7 +58,7 @@ spec:
             httpGet:
               path: /health
               port: 8000
-              scheme: HTTP
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5

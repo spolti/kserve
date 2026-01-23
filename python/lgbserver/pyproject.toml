@@ -5,13 +5,12 @@ authors = [
 license = {text = "Apache-2.0"}
 requires-python = "<3.13,>=3.9"
 dependencies = [
-    "kserve @ file:///${PROJECT_ROOT}/../kserve",
-    "kserve-storage @ file:///${PROJECT_ROOT}/../storage",
+    "kserve[storage] @ file:///${PROJECT_ROOT}/../kserve",
     "lightgbm[scikit-learn]~=4.5.0",
     "pandas<3.0.0,>=2.2.0",
 ]
 name = "lgbserver"
-version = "0.16.0rc1"
+version = "0.16.0rc0"
 description = "Model Server implementation for LightGBM. Not intended for use outside KServe Frameworks Images."
 readme = "README.md"
 
