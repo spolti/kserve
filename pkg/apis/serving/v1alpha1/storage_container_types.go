@@ -34,9 +34,6 @@ type StorageContainerSpec struct {
 	SupportedUriFormats []SupportedUriFormat `json:"supportedUriFormats" validate:"required"`
 	// +kubebuilder:default="initContainer"
 	WorkloadType WorkloadType `json:"workloadType,omitempty"`
-
-	// +kubebuilder:default=false
-	SupportsMultiModelDownload *bool `json:"supportsMultiModelDownload,omitempty"`
 }
 
 // SupportedUriFormat can be either prefix or regex. Todo: Add validation that only one of them is set.

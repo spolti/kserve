@@ -18,33 +18,19 @@ package s3
 
 import corev1 "k8s.io/api/core/v1"
 
-// BuildS3EnvVars sets s3 related env variables based on the provided configuration.
-// Env variables will not be set unless their corresponding configured value is a non-empty string.
-//
-// Parameters:
-//   - annotations: The annotations present within a service account or secret.
-//   - secretData: The data contained within a secret, if needed.
-//   - s3Config: The s3 configuration defined in the inferenceservice-config configmap.
-//
-// Returns:
-//
-//	A list of all set env variables.
-func BuildS3EnvVars(annotations map[string]string, secretData *map[string][]byte, s3Config *S3Config) []corev1.EnvVar {
+func BuildS3EnvVars(annotations map[string]string, s3Config *S3Config) []corev1.EnvVar {
 	envs := []corev1.EnvVar{}
 
-	s3UseHttps := getEnvValue(annotations, secretData, InferenceServiceS3SecretHttpsAnnotation, S3UseHttps, s3Config.S3UseHttps)
-	if s3UseHttps != "" {
-		envs = append(envs, corev1.EnvVar{
-			Name:  S3UseHttps,
-			Value: s3UseHttps,
-		})
-	}
-
-	s3Endpoint := getEnvValue(annotations, secretData, InferenceServiceS3SecretEndpointAnnotation, S3Endpoint, s3Config.S3Endpoint)
-	if s3Endpoint != "" {
+	if s3Endpoint, ok := annotations[InferenceServiceS3SecretEndpointAnnotation]; ok {
 		s3EndpointUrl := "https://" + s3Endpoint
-		if s3UseHttps == "0" {
-			s3EndpointUrl = "http://" + s3Endpoint
+		if s3UseHttps, ok := annotations[InferenceServiceS3SecretHttpsAnnotation]; ok {
+			if s3UseHttps == "0" {
+				s3EndpointUrl = "http://" + annotations[InferenceServiceS3SecretEndpointAnnotation]
+			}
+			envs = append(envs, corev1.EnvVar{
+				Name:  S3UseHttps,
+				Value: s3UseHttps,
+			})
 		}
 		envs = append(envs, corev1.EnvVar{
 			Name:  S3Endpoint,
@@ -54,25 +40,52 @@ func BuildS3EnvVars(annotations map[string]string, secretData *map[string][]byte
 			Name:  AWSEndpointUrl,
 			Value: s3EndpointUrl,
 		})
+	} else if s3Config.S3Endpoint != "" {
+		s3EndpointUrl := "https://" + s3Config.S3Endpoint
+		if s3Config.S3UseHttps == "0" {
+			s3EndpointUrl = "http://" + s3Config.S3Endpoint
+			envs = append(envs, corev1.EnvVar{
+				Name:  S3UseHttps,
+				Value: s3Config.S3UseHttps,
+			})
+		}
+		envs = append(envs, corev1.EnvVar{
+			Name:  S3Endpoint,
+			Value: s3Config.S3Endpoint,
+		})
+		envs = append(envs, corev1.EnvVar{
+			Name:  AWSEndpointUrl,
+			Value: s3EndpointUrl,
+		})
 	}
 
-	s3VerifySSL := getEnvValue(annotations, secretData, InferenceServiceS3SecretSSLAnnotation, S3VerifySSL, s3Config.S3VerifySSL)
-	if s3VerifySSL != "" {
+	// For each variable, prefer the value from the annotation, otherwise default to the value from the inferenceservice configmap if set.
+	verifySsl, ok := annotations[InferenceServiceS3SecretSSLAnnotation]
+	if !ok {
+		verifySsl = s3Config.S3VerifySSL
+	}
+	if verifySsl != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  S3VerifySSL,
-			Value: s3VerifySSL,
+			Value: verifySsl,
 		})
 	}
 
-	s3UseAnonymousCredential := getEnvValue(annotations, secretData, InferenceServiceS3UseAnonymousCredential, AWSAnonymousCredential, s3Config.S3UseAnonymousCredential)
-	if s3UseAnonymousCredential != "" {
+	useAnonymousCredential, ok := annotations[InferenceServiceS3UseAnonymousCredential]
+	if !ok {
+		useAnonymousCredential = s3Config.S3UseAnonymousCredential
+	}
+	if useAnonymousCredential != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  AWSAnonymousCredential,
-			Value: s3UseAnonymousCredential,
+			Value: useAnonymousCredential,
 		})
 	}
 
-	s3Region := getEnvValue(annotations, secretData, InferenceServiceS3SecretRegionAnnotation, AWSRegion, s3Config.S3Region)
+	s3Region, ok := annotations[InferenceServiceS3SecretRegionAnnotation]
+	if !ok {
+		s3Region = s3Config.S3Region
+	}
 	if s3Region != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  AWSRegion,
@@ -80,76 +93,49 @@ func BuildS3EnvVars(annotations map[string]string, secretData *map[string][]byte
 		})
 	}
 
-	s3UseVirtualBucket := getEnvValue(annotations, secretData, InferenceServiceS3UseVirtualBucketAnnotation, S3UseVirtualBucket, s3Config.S3UseVirtualBucket)
-	if s3UseVirtualBucket != "" {
+	useVirtualBucket, ok := annotations[InferenceServiceS3UseVirtualBucketAnnotation]
+	if !ok {
+		useVirtualBucket = s3Config.S3UseVirtualBucket
+	}
+	if useVirtualBucket != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  S3UseVirtualBucket,
-			Value: s3UseVirtualBucket,
+			Value: useVirtualBucket,
 		})
 	}
 
-	s3UseAccelerate := getEnvValue(annotations, secretData, InferenceServiceS3UseAccelerateAnnotation, S3UseAccelerate, s3Config.S3UseAccelerate)
-	if s3UseAccelerate != "" {
+	useAccelerate, ok := annotations[InferenceServiceS3UseAccelerateAnnotation]
+	if !ok {
+		useAccelerate = s3Config.S3UseAccelerate
+	}
+	if useAccelerate != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  S3UseAccelerate,
-			Value: s3UseAccelerate,
+			Value: useAccelerate,
 		})
 	}
 
-	s3CustomCABundle := getEnvValue(annotations, secretData, InferenceServiceS3CABundleAnnotation, AWSCABundle, s3Config.S3CABundle)
-	if s3CustomCABundle != "" {
+	customCABundle, ok := annotations[InferenceServiceS3CABundleAnnotation]
+	if !ok {
+		customCABundle = s3Config.S3CABundle
+	}
+	if customCABundle != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  AWSCABundle,
-			Value: s3CustomCABundle,
+			Value: customCABundle,
 		})
 	}
 
-	s3CustomCABundleConfigMap := getEnvValue(annotations, secretData, InferenceServiceS3CABundleConfigMapAnnotation, AWSCABundleConfigMap, s3Config.S3CABundleConfigMap)
-	if s3CustomCABundleConfigMap != "" {
+	customCABundleConfigMap, ok := annotations[InferenceServiceS3CABundleConfigMapAnnotation]
+	if !ok {
+		customCABundleConfigMap = s3Config.S3CABundleConfigMap
+	}
+	if customCABundleConfigMap != "" {
 		envs = append(envs, corev1.EnvVar{
 			Name:  AWSCABundleConfigMap,
-			Value: s3CustomCABundleConfigMap,
+			Value: customCABundleConfigMap,
 		})
 	}
 
 	return envs
-}
-
-// getEnvValue fetches a value from the provided configuration.
-// The value is fetched from the annotations, secretData, or s3Config in that order.
-//
-// Parameters:
-//   - annotations: The annotations present within a service account or secret.
-//   - secretData: The data contained within a secret, if needed.
-//   - annotationKey: The key in the annotations map from which to fetch the desired env variable.
-//   - secretDataKey: The key in the secret data map from which to fetch the desired env variable.
-//   - s3ConfigValue: The value configured in the s3Config for the desired env variable.
-//
-// Returns:
-//
-//	The value fetched from the configuration if found, otherwise an empty string.
-func getEnvValue(annotations map[string]string, secretData *map[string][]byte, annotationKey string, secretDataKey string, s3ConfigValue string) string {
-	var envValue string
-	if annotationValue, ok := annotations[annotationKey]; ok {
-		envValue = annotationValue
-	} else if secretValue, ok := getSecretValueFromPtr(secretData, secretDataKey); ok {
-		envValue = secretValue
-	} else {
-		envValue = s3ConfigValue
-	}
-
-	return envValue
-}
-
-func getSecretValueFromPtr(secretData *map[string][]byte, secretDataKey string) (string, bool) {
-	var found bool
-	var secretValue string
-	if secretData != nil {
-		if val, ok := (*secretData)[secretDataKey]; ok {
-			found = true
-			secretValue = string(val)
-		}
-	}
-
-	return secretValue, found
 }

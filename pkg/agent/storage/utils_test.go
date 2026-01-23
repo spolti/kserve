@@ -108,24 +108,15 @@ func TestGetProvider(t *testing.T) {
 			Client:     &mocks.MockS3Client{},
 			Downloader: &mocks.MockS3Downloader{},
 		},
-		GCS: &GCSProvider{
-			Client: mocks.NewMockClient(),
-		},
-		AZURE: &AzureProvider{
-			Client: mocks.NewMockAzureClient(),
-		},
 	}
-	for nextProtocol := range mockProviders {
-		provider, err := GetProvider(mockProviders, nextProtocol)
+	provider, err := GetProvider(mockProviders, S3)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(provider).Should(gomega.Equal(mockProviders[S3]))
+
+	// When providers map does not have specified provider
+	for _, protocol := range SupportedProtocols {
+		provider, err = GetProvider(map[Protocol]Provider{}, protocol)
 		g.Expect(err).ToNot(gomega.HaveOccurred())
 		g.Expect(provider).ShouldNot(gomega.BeNil())
-		g.Expect(provider).Should(gomega.Equal(mockProviders[nextProtocol]))
-
-		// When providers map does not have specified provider
-		for _, protocol := range SupportedProtocols {
-			provider, err = GetProvider(map[Protocol]Provider{}, protocol)
-			g.Expect(err).ToNot(gomega.HaveOccurred())
-			g.Expect(provider).ShouldNot(gomega.BeNil())
-		}
 	}
 }

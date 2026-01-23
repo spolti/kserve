@@ -67,17 +67,6 @@ func NewKedaReconciler(client client.Client,
 	}, nil
 }
 
-// getOriginalStringMQ extracts the original raw string value from MetricQuantity
-func getOriginalStringMQ(mq *v1beta1.MetricQuantity, defaultValue string) string {
-	if mq == nil {
-		return defaultValue
-	}
-	if raw := mq.GetOriginal(); raw != "" {
-		return raw
-	}
-	return defaultValue
-}
-
 func getKedaMetrics(componentMeta metav1.ObjectMeta, componentExt *v1beta1.ComponentExtensionSpec, configMap *corev1.ConfigMap,
 ) ([]kedav1alpha1.ScaleTriggers, error) {
 	var triggers []kedav1alpha1.ScaleTriggers
@@ -103,9 +92,13 @@ func getKedaMetrics(componentMeta metav1.ObjectMeta, componentExt *v1beta1.Compo
 						targetValue = strconv.Itoa(int(*averageUtil))
 					}
 				case v1beta1.AverageValueMetricType:
-					targetValue = getOriginalStringMQ(metric.Resource.Target.AverageValue, "0")
+					if metric.Resource.Target.AverageValue != nil {
+						targetValue = metric.Resource.Target.AverageValue.String()
+					}
 				case v1beta1.ValueMetricType:
-					targetValue = getOriginalStringMQ(metric.Resource.Target.Value, "0")
+					if metric.Resource.Target.Value != nil {
+						targetValue = metric.Resource.Target.Value.String()
+					}
 				}
 				triggers = append(triggers, kedav1alpha1.ScaleTriggers{
 					Type:       triggerType,
@@ -122,7 +115,7 @@ func getKedaMetrics(componentMeta metav1.ObjectMeta, componentExt *v1beta1.Compo
 					Metadata: map[string]string{
 						"serverAddress": serverAddress,
 						"query":         query,
-						"threshold":     getOriginalStringMQ(metric.External.Target.Value, "0"),
+						"threshold":     fmt.Sprintf("%f", metric.External.Target.Value.AsApproximateFloat64()),
 					},
 				}
 
@@ -155,7 +148,7 @@ func getKedaMetrics(componentMeta metav1.ObjectMeta, componentExt *v1beta1.Compo
 
 				triggerType := string(metric.PodMetric.Metric.Backend)
 				query := metric.PodMetric.Metric.Query
-				targetValue := getOriginalStringMQ(metric.PodMetric.Target.Value, "0")
+				targetValue := metric.PodMetric.Target.Value.String()
 
 				trigger := kedav1alpha1.ScaleTriggers{
 					Metadata: map[string]string{},

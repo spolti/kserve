@@ -27,6 +27,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/kserve/kserve/pkg/constants"
 	"github.com/kserve/kserve/pkg/utils"
 )
@@ -249,12 +251,12 @@ type MetricTarget struct {
 
 	// value is the target value of the metric (as a quantity).
 	// +optional
-	Value *MetricQuantity `json:"value,omitempty"`
+	Value *resource.Quantity `json:"value,omitempty"`
 
 	// averageValue is the target value of the average of the
 	// metric across all relevant pods (as a quantity)
 	// +optional
-	AverageValue *MetricQuantity `json:"averageValue,omitempty"`
+	AverageValue *resource.Quantity `json:"averageValue,omitempty"`
 
 	// averageUtilization is the target value of the average of the
 	// resource metric across all relevant pods, represented as a percentage of

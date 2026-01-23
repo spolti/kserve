@@ -21,7 +21,6 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -61,21 +60,10 @@ func (mutator *Mutator) Handle(ctx context.Context, req admission.Request) admis
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
-	isvcName := pod.ObjectMeta.Labels[constants.InferenceServiceLabel]
-	isvc := &v1beta1.InferenceService{}
-	if err := mutator.Client.Get(ctx, types.NamespacedName{
-		Namespace: req.AdmissionRequest.Namespace,
-		Name:      isvcName,
-	}, isvc); err != nil {
-		// failing to look up the inference service is not fatal, it only prevents accessing the embedded logging spec.
-		// log the error but allow the mutator to continue
-		log.Info("Failed to get InferenceService", "name", isvcName, "err", err.Error())
-	}
-
 	// For some reason pod namespace is always empty when coming to pod mutator, need to set from admission request
 	pod.Namespace = req.AdmissionRequest.Namespace
 
-	if err := mutator.mutate(ctx, pod, configMap, isvc); err != nil {
+	if err := mutator.mutate(pod, configMap); err != nil {
 		log.Error(err, "Failed to mutate pod", "name", pod.Labels[constants.InferenceServicePodLabelKey])
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
@@ -89,7 +77,7 @@ func (mutator *Mutator) Handle(ctx context.Context, req admission.Request) admis
 	return admission.PatchResponseFromRaw(req.AdmissionRequest.Object.Raw, patch)
 }
 
-func (mutator *Mutator) mutate(ctx context.Context, pod *corev1.Pod, configMap *corev1.ConfigMap, isvc *v1beta1.InferenceService) error {
+func (mutator *Mutator) mutate(pod *corev1.Pod, configMap *corev1.ConfigMap) error {
 	credentialBuilder := credentials.NewCredentialBuilder(mutator.Client, mutator.Clientset, configMap)
 
 	storageInitializerConfig, err := v1beta1.GetStorageInitializerConfigs(configMap)
@@ -103,7 +91,7 @@ func (mutator *Mutator) mutate(ctx context.Context, pod *corev1.Pod, configMap *
 		client:            mutator.Client,
 	}
 
-	loggerConfig, err := getLoggerConfigs(pod, configMap, isvc)
+	loggerConfig, err := getLoggerConfigs(configMap)
 	if err != nil {
 		return err
 	}
@@ -129,9 +117,7 @@ func (mutator *Mutator) mutate(ctx context.Context, pod *corev1.Pod, configMap *
 
 	mutators := []func(pod *corev1.Pod) error{
 		InjectGKEAcceleratorSelector,
-		func(pod *corev1.Pod) error {
-			return storageInitializer.InjectStorageInitializer(ctx, pod)
-		},
+		storageInitializer.InjectStorageInitializer,
 		storageInitializer.SetIstioCniSecurityContext,
 		agentInjector.InjectAgent,
 		metricsAggregator.InjectMetricsAggregator,

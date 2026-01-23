@@ -29,16 +29,8 @@ import (
 type StorageStrategy string
 
 const (
-	S3Storage    StorageStrategy = "s3"
-	GCSStorage   StorageStrategy = "gcs"
-	AzureStorage StorageStrategy = "abfs"
-	HttpStorage  StorageStrategy = "http"
-)
-
-const (
-	S3Prefix    string = "s3"
-	GCSPrefix   string = "gs"
-	AzurePrefix string = "abfs"
+	S3Storage   StorageStrategy = "s3"
+	HttpStorage StorageStrategy = "http"
 )
 
 const DefaultStorage = HttpStorage
@@ -51,10 +43,7 @@ func GetStorageStrategy(url string) StorageStrategy {
 
 	case strings.HasPrefix(url, "s3"): // s3, s3a
 		return S3Storage
-	case strings.HasPrefix(url, "gs"): // gcs
-		return GCSStorage
-	case strings.HasPrefix(url, "abfs"):
-		return AzureStorage
+
 	default:
 		return DefaultStorage
 	}
@@ -83,7 +72,7 @@ type Store interface {
 	Store(logUrl *url.URL, logRequest LogRequest) error
 }
 
-type BlobStore struct {
+type S3Store struct {
 	storePath   string
 	storeFormat string
 	log         *zap.SugaredLogger
@@ -91,10 +80,10 @@ type BlobStore struct {
 	provider    storage.Provider
 }
 
-var _ Store = &BlobStore{}
+var _ Store = &S3Store{}
 
-func NewBlobStore(logStorePath string, logStoreFormat string, marshaller Marshaller, provider storage.Provider, log *zap.SugaredLogger) *BlobStore {
-	return &BlobStore{
+func NewS3Store(logStorePath string, logStoreFormat string, marshaller Marshaller, provider storage.Provider, log *zap.SugaredLogger) *S3Store {
+	return &S3Store{
 		storePath:   logStorePath,
 		storeFormat: logStoreFormat,
 		marshaller:  marshaller,
@@ -119,20 +108,15 @@ func NewStoreForScheme(scheme string, logStorePath string, logStoreFormat string
 	protocol := storage.Protocol(scheme)
 	provider, err := storage.GetProvider(map[storage.Protocol]storage.Provider{}, protocol)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create storage provider: %w", err)
+		return nil, fmt.Errorf("failed to create S3 provider: %w", err)
 	}
-	switch protocol {
-	case storage.AZURE:
-		fallthrough
-	case storage.GCS:
-		fallthrough
-	case storage.S3:
-		return NewBlobStore(logStorePath, logStoreFormat, marshaller, provider, log), nil
+	if protocol == storage.S3 {
+		return NewS3Store(logStorePath, logStoreFormat, marshaller, provider, log), nil
 	}
 	return nil, fmt.Errorf("unsupported protocol %s", protocol)
 }
 
-func (s *BlobStore) Store(logUrl *url.URL, logRequest LogRequest) error {
+func (s *S3Store) Store(logUrl *url.URL, logRequest LogRequest) error {
 	if logUrl == nil {
 		return errors.New("log url is invalid")
 	}
@@ -143,7 +127,7 @@ func (s *BlobStore) Store(logUrl *url.URL, logRequest LogRequest) error {
 		return err
 	}
 
-	bucket, configPrefix, err := parseBlobStoreURL(logUrl.String(), s.log)
+	bucket, configPrefix, err := parseS3URL(logUrl.String())
 	if err != nil {
 		s.log.Error(err)
 		return err
@@ -168,7 +152,7 @@ func (s *BlobStore) Store(logUrl *url.URL, logRequest LogRequest) error {
 	return nil
 }
 
-func (s *BlobStore) getObjectPrefix(configPrefix string, request *LogRequest) (string, error) {
+func (s *S3Store) getObjectPrefix(configPrefix string, request *LogRequest) (string, error) {
 	if request == nil {
 		return "", errors.New("log request is invalid")
 	}
@@ -193,7 +177,7 @@ func (s *BlobStore) getObjectPrefix(configPrefix string, request *LogRequest) (s
 	return path.Join(parts...), nil
 }
 
-func (s *BlobStore) getObjectKey(configPrefix string, request *LogRequest) (string, error) {
+func (s *S3Store) getObjectKey(configPrefix string, request *LogRequest) (string, error) {
 	if request == nil {
 		return "", errors.New("log request is invalid")
 	}
@@ -213,27 +197,18 @@ func (s *BlobStore) getObjectKey(configPrefix string, request *LogRequest) (stri
 	return fmt.Sprintf("%s/%s-%s.%s", prefix, request.Id, reqType, s.storeFormat), nil
 }
 
-func isValidScheme(scheme string) bool {
-	return strings.HasPrefix(scheme, S3Prefix) || strings.HasPrefix(scheme, GCSPrefix) || strings.HasPrefix(scheme, AzurePrefix)
-}
-
-func parseBlobStoreURL(blobStoreUrl string, log *zap.SugaredLogger) (bucket, key string, err error) {
-	u, err := url.Parse(blobStoreUrl)
+func parseS3URL(s3url string) (bucket, key string, err error) {
+	u, err := url.Parse(s3url)
 	if err != nil {
 		return "", "", err
 	}
 
-	if !isValidScheme(u.Scheme) {
+	if !strings.HasPrefix(u.Scheme, "s3") {
 		return "", "", fmt.Errorf("invalid scheme: %q", u.Scheme)
 	}
 
 	bucket = u.Host
-	if u.User != nil {
-		// azure URLs follow the format https://user@host/path/to/file where user is the bucket name.
-		bucket = u.User.Username()
-	}
 	// u.Path starts with a "/" so trim it off.
 	key = strings.TrimPrefix(u.Path, "/")
-	log.Debugf("Returning bucket: %s", bucket)
 	return bucket, key, nil
 }
