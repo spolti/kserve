@@ -19,6 +19,7 @@ package inferenceservice
 import (
 	"context"
 	"fmt"
+
 	"reflect"
 
 	kedav1alpha1 "github.com/kedacore/keda/v2/apis/keda/v1alpha1"
@@ -30,6 +31,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -1706,7 +1708,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 				// Define InferenceService
 				isvc := defaultIsvc(serviceKey, string(constants.AutoscalerClassHPA), v1beta1.NewMetricQuantity("10Gi"))
-
 				isvc.Annotations[constants.StopAnnotationKey] = "false"
 				Expect(k8sClient.Create(ctx, isvc)).NotTo(HaveOccurred())
 				defer k8sClient.Delete(ctx, isvc)
@@ -1780,7 +1781,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				isvc.Spec.Predictor.ComponentExtensionSpec.AutoScaling = &v1beta1.AutoScalingSpec{
 					Metrics: getDefaultMetrics(),
 				}
-
 				Expect(k8sClient.Create(ctx, isvc)).NotTo(HaveOccurred())
 				defer k8sClient.Delete(ctx, isvc)
 
@@ -1838,7 +1838,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 				// Define InferenceService
 				isvc := defaultIsvc(serviceKey, string(constants.AutoscalerClassHPA), v1beta1.NewMetricQuantity("10Gi"))
-
 				isvc.Annotations[constants.StopAnnotationKey] = "true"
 				Expect(k8sClient.Create(ctx, isvc)).NotTo(HaveOccurred())
 				defer k8sClient.Delete(ctx, isvc)
@@ -2149,7 +2148,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 				// Define InferenceService
 				isvc := defaultIsvc(serviceKey, string(constants.AutoscalerClassHPA), v1beta1.NewMetricQuantity("10Gi"))
-
 				isvc.Annotations[constants.StopAnnotationKey] = "true"
 				Expect(k8sClient.Create(ctx, isvc)).NotTo(HaveOccurred())
 				defer k8sClient.Delete(ctx, isvc)
@@ -3899,7 +3897,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Name:      constants.PredictorServiceName(serviceKey.Name),
 				Namespace: serviceKey.Namespace,
 			}
-
 			Eventually(func() error {
 				return k8sClient.Get(context.TODO(), predictorDeploymentKey, actualDeployment)
 			}, timeout, interval).Should(Succeed())
@@ -4118,7 +4115,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Name:      constants.PredictorServiceName(serviceKey.Name),
 				Namespace: serviceKey.Namespace,
 			}
-
 			Eventually(func() error {
 				return k8sClient.Get(context.TODO(), predictorDeploymentKey, actualDeployment)
 			}, timeout, interval).Should(Succeed())
@@ -4654,7 +4650,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 								constants.KServiceComponentLabel:      constants.Transformer.String(),
 								constants.InferenceServicePodLabelKey: serviceName,
 							},
-							Annotations: annotations,
+							Annotations: getDefaultAnnotations(constants.AutoscalerClassHPA),
 						},
 						Spec: corev1.PodSpec{
 							Containers: []corev1.Container{
@@ -6062,7 +6058,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Name:      constants.PredictorServiceName(serviceKey.Name),
 				Namespace: serviceKey.Namespace,
 			}
-
 			Eventually(func() error {
 				return k8sClient.Get(context.TODO(), predictorDeploymentKey, actualDeployment)
 			}, timeout, interval).Should(Succeed())
@@ -6648,7 +6643,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 								constants.KServiceComponentLabel:      constants.Transformer.String(),
 								constants.InferenceServicePodLabelKey: serviceName,
 							},
-							Annotations: annotations,
+							Annotations: getDefaultAnnotations(constants.AutoscalerClassHPA),
 						},
 						Spec: corev1.PodSpec{
 							Containers: []corev1.Container{
@@ -8462,7 +8457,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				Name:      constants.PredictorServiceName(serviceKey.Name),
 				Namespace: serviceKey.Namespace,
 			}
-
 			Eventually(func() error {
 				return k8sClient.Get(context.TODO(), predictorDeploymentKey, actualDeployment)
 			}, timeout, interval).Should(Succeed())
@@ -8562,7 +8556,6 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-predictor.default.svc.cluster.local",
 				"raw-foo-predictor-default.example.com", "")
-
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
