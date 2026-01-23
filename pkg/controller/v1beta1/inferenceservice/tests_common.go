@@ -45,7 +45,7 @@ const (
 
 	fastTimeout = time.Second * 3
 	timeout     = time.Second * 6
-	interval    	= time.Millisecond * 250
+	interval    = time.Millisecond * 250
 	domain      = "example.com"
 )
 

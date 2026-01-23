@@ -19,7 +19,6 @@ package inferenceservice
 import (
 	"context"
 	"fmt"
-
 	"reflect"
 
 	kedav1alpha1 "github.com/kedacore/keda/v2/apis/keda/v1alpha1"
@@ -4650,7 +4649,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 								constants.KServiceComponentLabel:      constants.Transformer.String(),
 								constants.InferenceServicePodLabelKey: serviceName,
 							},
-							Annotations: getDefaultAnnotations(constants.AutoscalerClassHPA),
+							Annotations: annotations,
 						},
 						Spec: corev1.PodSpec{
 							Containers: []corev1.Container{
@@ -6643,7 +6642,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 								constants.KServiceComponentLabel:      constants.Transformer.String(),
 								constants.InferenceServicePodLabelKey: serviceName,
 							},
-							Annotations: getDefaultAnnotations(constants.AutoscalerClassHPA),
+							Annotations: annotations,
 						},
 						Spec: corev1.PodSpec{
 							Containers: []corev1.Container{

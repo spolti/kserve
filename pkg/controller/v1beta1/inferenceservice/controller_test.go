@@ -305,7 +305,8 @@ var _ = Describe("v1beta1 inference service controller", func() {
 				}
 				actualService := &knservingv1.Service{}
 				Eventually(func() error {
-					return k8sClient.Get(context.TODO(), predictorServiceKey, actualService) },
+					return k8sClient.Get(context.TODO(), predictorServiceKey, actualService)
+				},
 					timeout, interval).Should(Succeed())
 
 				Expect(actualService.Spec.Template.Annotations).NotTo(HaveKey(autoscaling.InitialScaleAnnotationKey))
