@@ -23,5 +23,5 @@ $patch: delete
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: llmisvc-serving-cert
+  name: llmisvc-serving-certso, we can uncomment
   namespace: kserve
