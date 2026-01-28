@@ -719,7 +719,7 @@ data:
 
   deploy: |-
     {
-      "defaultDeploymentMode": "Serverless"
+      "defaultDeploymentMode": "RawDeployment"
     }
 
   metricsAggregator: |-
@@ -739,6 +739,11 @@ data:
   security: |-
     {
       "autoMountServiceAccountToken": true
+    }
+
+  service: |-
+    {
+        "serviceClusterIPNone": true
     }
 
   inferenceService: |-
@@ -769,9 +774,3 @@ data:
       "scaleUpStabilizationWindowSeconds": "0",
       "scaleDownStabilizationWindowSeconds": "300"
     }
-
-  service: |-
-    {
-        "serviceClusterIPNone": false
-    }
-

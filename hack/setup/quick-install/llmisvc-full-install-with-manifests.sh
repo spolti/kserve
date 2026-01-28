@@ -516,7 +516,7 @@ KNATIVE_SERVING_VERSION=1.15.2
 KEDA_OTEL_ADDON_VERSION=v0.0.6
 KSERVE_VERSION=v0.16.0
 ISTIO_VERSION=1.27.1
-KEDA_VERSION=2.16.1
+KEDA_VERSION=2.17.3
 OPENTELEMETRY_OPERATOR_VERSION=0.113.0
 LWS_VERSION=v0.7.0
 GATEWAY_API_VERSION=v1.2.1
@@ -42446,7 +42446,7 @@ data:
     }
   deploy: |-
     {
-      "defaultDeploymentMode": "Serverless"
+      "defaultDeploymentMode": "RawDeployment"
     }
   explainers: |-
     {
@@ -42516,6 +42516,10 @@ data:
   security: |-
     {
       "autoMountServiceAccountToken": true
+    }
+  service: |-
+    {
+        "serviceClusterIPNone": true
     }
   storageInitializer: |-
     {
@@ -42603,6 +42607,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: SECRET_NAME
+          value: llmisvc-webhook-server-cert
         image: kserve/llmisvc-controller:latest
         imagePullPolicy: Always
         livenessProbe:
@@ -42662,20 +42668,6 @@ spec:
         secret:
           defaultMode: 420
           secretName: llmisvc-webhook-server-cert
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: llmisvc-serving-cert
-  namespace: kserve
-spec:
-  commonName: llmisvc-webhook-server-service.kserve.svc
-  dnsNames:
-  - llmisvc-webhook-server-service.kserve.svc
-  issuerRef:
-    kind: Issuer
-    name: selfsigned-issuer
-  secretName: llmisvc-webhook-server-cert
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
