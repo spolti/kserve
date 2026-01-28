@@ -210,26 +210,9 @@ spec:
 EOF
 echo "😀 Successfully created GatewayClass for Envoy"
 
+# Install LLMISvc using manage.kserve-helm.sh which handles both local and OCI charts
+# Note: The script checks USE_LOCAL_CHARTS internally and uses appropriate source
 LLMISVC=true ${SCRIPT_DIR}/setup/infra/manage.kserve-helm.sh
-
-if [ "${USE_LOCAL_CHARTS}" = true ]; then
-   # Install LLMISvc using local charts (to avoid template function errors in published charts)
-   echo "Installing LLMISvc using local charts..."
-   echo "📍 Using local charts from $(pwd)/charts/"
-   # Install LLMISvc CRDs from local chart
-   helm install llmisvc-crd ./charts/kserve-llmisvc-crd --namespace kserve --create-namespace --wait
-
-   # Install LLMISvc resources from local chart  
-   helm install llmisvc ./charts/kserve-llmisvc-resources --namespace kserve --create-namespace --wait --set kserve.llmisvc.controller.tag=local-test --set kserve.llmisvc.controller.imagePullPolicy=Never
-   echo "😀 Successfully installed LLMISvc using local charts"
-
-else
-   echo "Installing LLMISvc ..."
-   helm install llmisvc-crd oci://ghcr.io/kserve/charts/llmisvc-crd --version ${LLMISVC_VERSION} --namespace kserve --create-namespace --wait
-   helm install llmisvc oci://ghcr.io/kserve/charts/llmisvc-resources --version ${LLMISVC_VERSION} --namespace kserve --create-namespace --wait
-
-fi
-echo "😀 Successfully installed LLMISvc"
 
 # Create Gateway resource
 echo "Creating kserve-ingress-gateway ..."
