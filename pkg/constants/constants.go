@@ -132,6 +132,7 @@ var (
 	LoggerCredentialPathKey                     = KServeAPIGroupName + "/logger-secret-path"
 	LoggerCredentialFileKey                     = KServeAPIGroupName + "/logger-secret-file"
 	DisableAutoUpdateAnnotationKey              = KServeAPIGroupName + "/disable-auto-update"
+	ModelFormatAnnotationKey                    = "modelFormat"
 )
 
 // InferenceService Internal Annotations
@@ -451,6 +452,7 @@ var (
 		StorageInitializerSourceUriInternalAnnotationKey,
 		"kubectl.kubernetes.io/last-applied-configuration",
 		"security.opendatahub.io/enable-auth",
+		ModelFormatAnnotationKey,
 	}
 	// RevisionTemplateLabelDisallowedList is a list of labels that are not allowed to be propagated to Knative
 	// revisions, which prevents the reconciliation loop to be triggered if the labels is configured here are used.
