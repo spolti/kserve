@@ -905,9 +905,22 @@ func (r *RawHTTPRouteReconciler) Reconcile(ctx context.Context, isvc *v1beta1.In
 			Status: corev1.ConditionTrue,
 		})
 	}
-	if isvc.Status.URL, err = createRawURL(isvc, r.ingressConfig); err != nil {
-		return ctrl.Result{}, err
+
+	// Set the main URL based on ingress configuration
+	// When ingress is disabled or service is internal, use the internal service hostname
+	// Otherwise, use the external domain configured in ingressConfig
+	if isInternal || r.ingressConfig.DisableIngressCreation {
+		isvc.Status.URL = &knapis.URL{
+			Host:   getRawServiceHost(isvc),
+			Scheme: r.ingressConfig.UrlScheme,
+			Path:   "",
+		}
+	} else {
+		if isvc.Status.URL, err = createRawURL(isvc, r.ingressConfig); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
+
 	isvc.Status.Address = &duckv1.Addressable{
 		URL: &knapis.URL{
 			Host:   getRawServiceHost(isvc),
