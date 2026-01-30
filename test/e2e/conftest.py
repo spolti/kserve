@@ -42,7 +42,9 @@ def event_loop():
 @pytest_asyncio.fixture(scope="session")
 async def rest_v1_client():
     ca_cert_path = os.environ.get("REQUESTS_CA_BUNDLE")
+    http_transport = httpx.AsyncHTTPTransport(verify=ca_cert_path)
     transport = RetryTransport(
+        transport=http_transport,
         retry=Retry(
             total=4,
             backoff_factor=1,
@@ -57,7 +59,6 @@ async def rest_v1_client():
     )
     v1_client = InferenceRESTClient(
         config=RESTConfig(
-            verify=ca_cert_path,
             transport=transport,
             timeout=180,
             verbose=True,
@@ -71,7 +72,9 @@ async def rest_v1_client():
 @pytest_asyncio.fixture(scope="session")
 async def rest_v2_client():
     ca_cert_path = os.environ.get("REQUESTS_CA_BUNDLE")
+    http_transport = httpx.AsyncHTTPTransport(verify=ca_cert_path)
     transport = RetryTransport(
+        transport=http_transport,
         retry=Retry(
             total=4,
             backoff_factor=1,
@@ -86,7 +89,6 @@ async def rest_v2_client():
     )
     v2_client = InferenceRESTClient(
         config=RESTConfig(
-            verify=ca_cert_path,
             transport=transport,
             timeout=180,
             verbose=True,
