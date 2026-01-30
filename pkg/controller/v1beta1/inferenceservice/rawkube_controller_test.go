@@ -3840,7 +3840,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			expectResourceDoesNotExist(ctx, &gwapiv1.HTTPRoute{}, predictorServiceKey)
 
 			// verify if InferenceService status is updated
-			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-no-ingress-class-predictor.default.svc.cluster.local",
+			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-no-ingress-class-default.example.com",
 				"raw-foo-no-ingress-class-predictor-default.example.com", "")
 
 			Eventually(func() string {
@@ -8500,6 +8500,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 							},
 							Annotations: map[string]string{
 								constants.StorageInitializerSourceUriInternalAnnotationKey: *isvc.Spec.Predictor.Model.StorageURI,
+								constants.ModelFormatAnnotationKey:                         "tensorflow",
 								"serving.kserve.io/deploymentMode":                         "Standard",
 								constants.ODHKserveRawAuth:                                 "true",
 								"service.beta.openshift.io/serving-cert-secret-name":       predictorDeploymentKey.Name + constants.ServingCertSecretSuffix,

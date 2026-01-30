@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -624,6 +624,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/31/109ef4bedeb32b4202e02ddb133162457adc4eb890a9ed9c05c9dd126ed0/colorful-0.5.8.tar.gz", hash = "sha256:bb16502b198be2f1c42ba3c52c703d5f651d826076817185f0294c1a549a7445", size = 209361, upload-time = "2025-10-29T11:53:21.663Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c3/11/25cdf9d5fc21efd30134fc74c43702c6f7ef09ebae8ed927f1283403ad8d/colorful-0.5.8-py2.py3-none-any.whl", hash = "sha256:a9381fdda3337fbaba5771991020abc69676afa102646650b759927892875992", size = 201334, upload-time = "2025-10-29T11:53:20.251Z" },
+]
+
+[[package]]
+name = "colorlog"
+version = "6.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a2/61/f083b5ac52e505dfc1c624eafbf8c7589a0d7f32daa398d2e7590efa5fda/colorlog-6.10.1.tar.gz", hash = "sha256:eb4ae5cb65fe7fec7773c2306061a8e63e02efc2c72eba9d27b0fa23c94f1321", size = 17162, upload-time = "2025-10-16T16:14:11.978Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/c1/e419ef3723a074172b68aaa89c9f3de486ed4c2399e2dbd8113a4fdcaf9e/colorlog-6.10.1-py3-none-any.whl", hash = "sha256:2d7e8348291948af66122cff006c9f8da6255d224e7cf8e37d8de2df3bad8c9c", size = 11743, upload-time = "2025-10-16T16:14:10.512Z" },
 ]
 
 [[package]]
@@ -1779,6 +1791,7 @@ test = [
     { name = "pytest-cov" },
     { name = "pytest-httpx" },
     { name = "pytest-xdist" },
+    { name = "timeout-sampler" },
     { name = "tomlkit" },
 ]
 
@@ -1828,6 +1841,7 @@ test = [
     { name = "pytest-cov", specifier = ">=5.0.0,<6.0.0" },
     { name = "pytest-httpx", specifier = ">=0.30.0,<1.0.0" },
     { name = "pytest-xdist", specifier = ">=3.0.2,<4.0.0" },
+    { name = "timeout-sampler", specifier = ">=1.0.0,<2.0.0" },
     { name = "tomlkit", specifier = ">=0.12.0,<1.0.0" },
 ]
 
@@ -2700,15 +2714,15 @@ wheels = [
 [[package]]
 name = "opentelemetry-exporter-prometheus"
 version = "1.12.0rc1"
-source = { registry = "https://test.pypi.org/simple/" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
 ]
-sdist = { url = "https://test-files.pythonhosted.org/packages/87/fe/e94cf40c01f2ba78dc4854c8ea61be2f6d418387c2f0f739232dba716419/opentelemetry-exporter-prometheus-1.12.0rc1.tar.gz", hash = "sha256:f10c6c243d69d5b63f755885b36a4ce8ef2cdf3e737c4e6bf00f32e87668f0a9", size = 10097, upload-time = "2022-05-17T20:54:40.007Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/fe/e94cf40c01f2ba78dc4854c8ea61be2f6d418387c2f0f739232dba716419/opentelemetry-exporter-prometheus-1.12.0rc1.tar.gz", hash = "sha256:f10c6c243d69d5b63f755885b36a4ce8ef2cdf3e737c4e6bf00f32e87668f0a9", size = 10097, upload-time = "2022-05-17T20:55:30.161Z" }
 wheels = [
-    { url = "https://test-files.pythonhosted.org/packages/e9/ae/d44f958d61700daaaead0452d7d911170117863ab392d0741cf21aaec451/opentelemetry_exporter_prometheus-1.12.0rc1-py3-none-any.whl", hash = "sha256:1f0c8f93d62e1575313966ceb8abf11e9a46e1839fda9ee4269b06d40494280f", size = 10068, upload-time = "2022-05-17T20:54:17.927Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/ae/d44f958d61700daaaead0452d7d911170117863ab392d0741cf21aaec451/opentelemetry_exporter_prometheus-1.12.0rc1-py3-none-any.whl", hash = "sha256:1f0c8f93d62e1575313966ceb8abf11e9a46e1839fda9ee4269b06d40494280f", size = 10068, upload-time = "2022-05-17T20:55:04.767Z" },
 ]
 
 [[package]]
@@ -3541,6 +3555,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-simple-logger"
+version = "2.0.18"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorlog" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/7e/6eeae8c7affa2c4c1aa765a5c6a5ad15914184654e355e66d04a3cbac2f9/python_simple_logger-2.0.18.tar.gz", hash = "sha256:7b1fc3c9389d6e68a37527c2570a5050996f7c5b7af1b62baf661c112b76d6af", size = 9726, upload-time = "2025-10-25T09:40:39.68Z" }
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4294,6 +4317,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/20/cc/b064cae1a0e9fac84b0d2c46b89f4e57051a5f41324e385d10225a984c24/tiktoken-0.12.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:83d16643edb7fa2c99eff2ab7733508aae1eebb03d5dfc46f5565862810f24e3", size = 1254688, upload-time = "2025-10-06T20:21:58.619Z" },
     { url = "https://files.pythonhosted.org/packages/81/10/b8523105c590c5b8349f2587e2fdfe51a69544bd5a76295fc20f2374f470/tiktoken-0.12.0-cp312-cp312-win_amd64.whl", hash = "sha256:ffc5288f34a8bc02e1ea7047b8d041104791d2ddbf42d1e5fa07822cbffe16bd", size = 878694, upload-time = "2025-10-06T20:21:59.876Z" },
 ]
+
+[[package]]
+name = "timeout-sampler"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-simple-logger" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e6/40/666561ffecb9b50adae217919875c39f2de73b36245a60f0e16a6e5526e6/timeout_sampler-1.0.3.tar.gz", hash = "sha256:e07826c346fc591422fc94664c776c139341198edefde69d25732893c4f09188", size = 3658, upload-time = "2024-12-15T12:49:47.667Z" }
 
 [[package]]
 name = "timing-asgi"
