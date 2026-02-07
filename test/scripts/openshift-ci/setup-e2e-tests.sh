@@ -123,10 +123,8 @@ fi
 if [[ "$INSTALL_ODH_OPERATOR" == "false" ]]; then
   # Manual installation: Install KServe directly with PR images
   echo "⏳ Installing KServe manually with PR images"
-  echo "⏳ Waiting for KServe CRDs"
+  echo "⏳ Installing base KServe CRDs"
   kustomize build $PROJECT_ROOT/config/crd | oc apply --server-side=true -f -
-
-  wait_for_crd llminferenceserviceconfigs.serving.kserve.io 90s
 
   echo "Installing KServe with Minio"
   kustomize build $PROJECT_ROOT/config/overlays/test |
@@ -136,6 +134,9 @@ if [[ "$INSTALL_ODH_OPERATOR" == "false" ]]; then
     sed "s|kserve/kserve-controller:latest|${KSERVE_CONTROLLER_IMAGE}|" |
     sed "s|kserve/llmisvc-controller:latest|${LLMISVC_CONTROLLER_IMAGE}|" |
     oc apply --server-side=true --force-conflicts -f -
+
+  echo "⏳ Waiting for LLMISvc CRD to be ready"
+  wait_for_crd llminferenceserviceconfigs.serving.kserve.io 90s
 
   # Install DSC/DSCI for manual installation
   echo "Installing DSC/DSCI resources..."
@@ -172,10 +173,10 @@ fi
 if skip_serverless "$1"; then
   echo "Patching RAW deployment, markers: $1"
   export OPENSHIFT_INGRESS_DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
-  cat config/overlays/test/configmap/inferenceservice-openshift-ci-raw.yaml | \
+  oc patch configmap inferenceservice-config -n ${KSERVE_NAMESPACE} --type=strategic \
+    --patch-file=<(cat config/overlays/test/configmap/inferenceservice-openshift-ci-raw.yaml | \
     sed "s/namespace: kserve/namespace: ${KSERVE_NAMESPACE}/" | \
-    envsubst | \
-    oc apply -f -
+    envsubst)
   oc delete pod -n ${KSERVE_NAMESPACE} -l control-plane=kserve-controller-manager
 
   # Patch DSC only in manual mode (operator mode uses yaml files directly)
@@ -184,10 +185,10 @@ if skip_serverless "$1"; then
   fi
 else
   export OPENSHIFT_INGRESS_DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
-  cat config/overlays/test/configmap/inferenceservice-openshift-ci-serverless-predictor.yaml | \
+  oc patch configmap inferenceservice-config -n ${KSERVE_NAMESPACE} --type=strategic \
+    --patch-file=<(cat config/overlays/test/configmap/inferenceservice-openshift-ci-serverless-predictor.yaml | \
     sed "s/namespace: kserve/namespace: ${KSERVE_NAMESPACE}/" | \
-    envsubst | \
-    oc apply -f -
+    envsubst)
 fi
 
 # Wait until KServe starts

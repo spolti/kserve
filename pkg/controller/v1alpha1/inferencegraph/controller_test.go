@@ -1146,7 +1146,8 @@ var _ = Describe("Inference Graph controller test", func() {
 			// ODH Svc checks
 			Expect(actualK8sServiceCreated.Spec.Ports[0].Port).To(Equal(int32(443)))
 			Expect(actualK8sServiceCreated.Spec.Ports[0].TargetPort.IntVal).To(Equal(int32(8080)))
-			Expect(actualK8sServiceCreated.ObjectMeta.Annotations).To(HaveKeyWithValue(constants.OpenshiftServingCertAnnotation, graphName+constants.ServingCertSecretSuffix))
+			// Verify OpenShift serving certificate annotation is present
+			Expect(actualK8sServiceCreated.ObjectMeta.Annotations[constants.OpenshiftServingCertAnnotation]).To(Equal(graphName + constants.ServingCertSecretSuffix))
 
 			// No Knative Service should get created in Raw deployment mode
 			actualKnServiceCreated := &knservingv1.Service{}
