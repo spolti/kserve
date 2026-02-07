@@ -1626,3 +1626,44 @@ func TestCreateRawDeploymentWithPrecedence(t *testing.T) {
 		})
 	}
 }
+
+// Test interface methods added for WorkloadReconciler interface
+func TestGetWorkloads(t *testing.T) {
+	deployment1 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "deployment1"}}
+	deployment2 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "deployment2"}}
+
+	reconciler := &DeploymentReconciler{
+		DeploymentList: []*appsv1.Deployment{deployment1, deployment2},
+	}
+
+	workloads := reconciler.GetWorkloads()
+	assert.Len(t, workloads, 2)
+	assert.Equal(t, "deployment1", workloads[0].GetName())
+	assert.Equal(t, "deployment2", workloads[1].GetName())
+}
+
+func TestSetControllerReferences(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = v1beta1.AddToScheme(scheme)
+	_ = appsv1.AddToScheme(scheme)
+
+	owner := &v1beta1.InferenceService{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-isvc", Namespace: "default", UID: "test-uid"},
+	}
+
+	deployment1 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "deployment1", Namespace: "default"}}
+	deployment2 := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "deployment2", Namespace: "default"}}
+
+	reconciler := &DeploymentReconciler{
+		DeploymentList: []*appsv1.Deployment{deployment1, deployment2},
+	}
+
+	err := reconciler.SetControllerReferences(owner, scheme)
+	require.NoError(t, err)
+
+	// Verify owner references were set
+	assert.Len(t, deployment1.GetOwnerReferences(), 1)
+	assert.Equal(t, owner.Name, deployment1.GetOwnerReferences()[0].Name)
+	assert.Len(t, deployment2.GetOwnerReferences(), 1)
+	assert.Equal(t, owner.Name, deployment2.GetOwnerReferences()[0].Name)
+}
