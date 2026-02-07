@@ -7,10 +7,9 @@ components:
 # - ../../localmodels
 
 resources:
-- ../../default
+- ../../base
 - user-cluster-roles.yaml
 - network-policies.yaml
-
 
 namespace: opendatahub
 
@@ -20,6 +19,14 @@ patches:
 - path: remove-clusterservingruntime-crd.yaml
 - path: inferenceservice-config-patch.yaml
 - path: set-resources-manager-patch.yaml
+- target:
+    kind: ValidatingWebhookConfiguration
+    name: inferenceservice.serving.kserve.io
+  path: openshift-ca-patch.yaml
+- target:
+    kind: CustomResourceDefinition
+    name: inferenceservices.serving.kserve.io
+  path: openshift-ca-patch.yaml
 
 replacements:
 - source:
