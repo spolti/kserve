@@ -459,7 +459,7 @@ func (r *InferenceServiceReconciler) servingRuntimeFunc(ctx context.Context, obj
 	return requests
 }
 
-//func (r *InferenceServiceReconciler) clusterServingRuntimeFunc(ctx context.Context, obj client.Object) []reconcile.Request {
+// func (r *InferenceServiceReconciler) clusterServingRuntimeFunc(ctx context.Context, obj client.Object) []reconcile.Request {
 //	clusterServingRuntimeObj, ok := obj.(*v1alpha1.ClusterServingRuntime)
 //
 //	if !ok || clusterServingRuntimeObj == nil {
@@ -492,7 +492,6 @@ func (r *InferenceServiceReconciler) servingRuntimeFunc(ctx context.Context, obj
 //	}
 //	return requests
 //}
-
 
 func (r *InferenceServiceReconciler) podInitContainersFunc(ctx context.Context, obj client.Object) []reconcile.Request {
 	pod, ok := obj.(*corev1.Pod)
@@ -630,7 +629,6 @@ func (r *InferenceServiceReconciler) SetupWithManager(mgr ctrl.Manager, deployCo
 	//	DeleteFunc:  func(e event.DeleteEvent) bool { return false },
 	//	GenericFunc: func(e event.GenericEvent) bool { return false },
 	// }
-
 
 	ctrlBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&v1beta1.InferenceService{}).

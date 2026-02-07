@@ -187,7 +187,7 @@ func NewRawKubeReconciler(ctx context.Context,
 			Client:              client,
 			ClientSet:           clientset,
 			Scheme:              scheme,
-			ResourceType:		 resourceType,
+			ResourceType:        resourceType,
 			ComponentMeta:       componentMeta,
 			WorkerComponentMeta: workerComponentMeta,
 			ComponentExt:        componentExt,
@@ -205,7 +205,7 @@ func NewRawKubeReconciler(ctx context.Context,
 		reconcilers.ServiceReconcilerParams{
 			Client:           client,
 			Scheme:           scheme,
-			ResourceType: resourceType,
+			ResourceType:     resourceType,
 			ComponentMeta:    componentMeta,
 			ComponentExt:     componentExt,
 			PodSpec:          podSpec,
@@ -213,7 +213,6 @@ func NewRawKubeReconciler(ctx context.Context,
 			ServiceConfig:    serviceConfig,
 		},
 	)
-
 	if err != nil {
 		return nil, err
 	}

@@ -652,7 +652,7 @@ var _ = Describe("ServingRuntime Watch", func() {
 		}
 	})
 
-	//Describe("clusterServingRuntimeFunc", func() {
+	// Describe("clusterServingRuntimeFunc", func() {
 	//	It("should only reconcile ISVCs that use the specific ClusterServingRuntime", func() {
 	//		// Create ISVC using clusterRuntime1
 	//		isvc1 := &v1beta1.InferenceService{
