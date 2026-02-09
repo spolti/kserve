@@ -784,7 +784,7 @@ var _ = Describe("ServingRuntime Watch", func() {
 	//		// Should not reconcile the ISVC because auto-update is disabled and it's ready
 	//		Expect(requests).To(BeEmpty())
 	//	})
-	//})
+	// })
 
 	Describe("servingRuntimeFunc", func() {
 		It("should only reconcile ISVCs that use the specific ServingRuntime", func() {
