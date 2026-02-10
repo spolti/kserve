@@ -994,6 +994,7 @@ convert_isvc(){
           .metadata.labels |= with_entries(select(.key | test("istio|knative") | not)) |
           .metadata.labels."networking.kserve.io/visibility" = "exposed" |
           (.metadata.annotations."openshift.io/display-name" | select(. != null)) |= . + "-raw" |
+          .metadata.annotations |= with_entries(select(.value != null)) |
           .metadata.annotations."serving.kserve.io/deploymentMode" = "RawDeployment" |
           .spec.predictor.model.runtime += "-raw"' "$ISVC_FILE" > "$ISVC_RAW_FILE"
     fi
