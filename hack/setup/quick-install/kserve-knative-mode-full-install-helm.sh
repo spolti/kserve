@@ -502,7 +502,7 @@ CONTROLLER_TOOLS_VERSION=v0.19.0
 ENVTEST_VERSION=latest
 YQ_VERSION=v4.28.1
 HELM_VERSION=v3.16.3
-KUSTOMIZE_VERSION=v5.5.0
+KUSTOMIZE_VERSION=v5.8.0
 HELM_DOCS_VERSION=v1.12.0
 BLACK_FMT_VERSION=24.3
 FLAKE8_LINT_VERSION=7.1
@@ -1058,7 +1058,7 @@ install_kserve() {
 
         # Install KServe CRDs from local chart
         log_info "Installing KServe CRDs..."
-        helm install "${KSERVE_CRD_RELEASE_NAME}" "${CHARTS_DIR}/${CRD_DIR_NAME}" \
+        helm upgrade --install "${KSERVE_CRD_RELEASE_NAME}" "${CHARTS_DIR}/${CRD_DIR_NAME}" \
             --namespace "${KSERVE_NAMESPACE}" \
             --create-namespace \
             --wait \
@@ -1066,7 +1066,7 @@ install_kserve() {
 
         # Install KServe resources from local chart
         log_info "Installing KServe resources..."
-        helm install "${KSERVE_RELEASE_NAME}" "${CHARTS_DIR}/${CORE_DIR_NAME}" \
+        helm upgrade --install "${KSERVE_RELEASE_NAME}" "${CHARTS_DIR}/${CORE_DIR_NAME}" \
             --namespace "${KSERVE_NAMESPACE}" \
             --create-namespace \
             --wait \
@@ -1079,7 +1079,7 @@ install_kserve() {
 
         # Install KServe CRDs
         log_info "Installing KServe CRDs..."
-        helm install "${KSERVE_CRD_RELEASE_NAME}" \
+        helm upgrade --install "${KSERVE_CRD_RELEASE_NAME}" \
             oci://ghcr.io/kserve/charts/${CRD_DIR_NAME} \
             --version "${KSERVE_VERSION}" \
             --namespace "${KSERVE_NAMESPACE}" \
@@ -1089,7 +1089,7 @@ install_kserve() {
 
         # Install KServe resources
         log_info "Installing KServe resources..."
-        if ! helm install "${KSERVE_RELEASE_NAME}" \
+        if ! helm upgrade --install "${KSERVE_RELEASE_NAME}" \
             oci://ghcr.io/kserve/charts/${KSERVE_RELEASE_NAME} \
             --version "${KSERVE_VERSION}" \
             --namespace "${KSERVE_NAMESPACE}" \

@@ -58,15 +58,9 @@ echo "STORAGE_INITIALIZER_IMAGE=$STORAGE_INITIALIZER_IMAGE"
 echo "ERROR_404_ISVC_IMAGE=$ERROR_404_ISVC_IMAGE"
 echo "SUCCESS_200_ISVC_IMAGE=$SUCCESS_200_ISVC_IMAGE"
 
-# Create directory for installing tooling
-# It is assumed that $HOME/.local/bin is in the $PATH
-mkdir -p $HOME/.local/bin
-
-# If Kustomize is not installed, install it
-if ! command -v kustomize &>/dev/null; then
-  echo "Installing Kustomize"
-  curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash -s -- 5.0.1 $HOME/.local/bin
-fi
+# Install Kustomize using the centralized install script
+$PROJECT_ROOT/hack/setup/cli/install-kustomize.sh
+export PATH="${PROJECT_ROOT}/bin:${PATH}"
 
 # If minio CLI is not installed, install it
 if ! command -v mc &>/dev/null; then
@@ -117,19 +111,18 @@ if [[ "$1" =~ raw ]]; then
   fi
 fi
 
-# Install prerequisite operators
+# Ensure the target namespace exists
+oc new-project ${KSERVE_NAMESPACE} || true
 
 # Install KServe components based on method
 if [[ "$INSTALL_ODH_OPERATOR" == "false" ]]; then
   # Manual installation: Install KServe directly with PR images
-  echo "⏳ Installing KServe manually with PR images"
-  echo "⏳ Waiting for KServe CRDs"
-  kustomize build $PROJECT_ROOT/config/crd | oc apply --server-side=true -f -
-
+  echo "⏳ Installing LLMISvc CRDs"
+  kustomize build $PROJECT_ROOT/config/crd/full/llmisvc | oc apply --server-side=true --force-conflicts -f -
   wait_for_crd llminferenceserviceconfigs.serving.kserve.io 90s
 
-  echo "Installing KServe with Minio"
-  kustomize build $PROJECT_ROOT/config/overlays/test |
+  echo "⏳ Installing KServe with Minio"
+  kustomize build $PROJECT_ROOT/config/overlays/odh-test |
     sed "s|kserve/storage-initializer:latest|${STORAGE_INITIALIZER_IMAGE}|" |
     sed "s|kserve/agent:latest|${KSERVE_AGENT_IMAGE}|" |
     sed "s|kserve/router:latest|${KSERVE_ROUTER_IMAGE}|" |
@@ -137,10 +130,14 @@ if [[ "$INSTALL_ODH_OPERATOR" == "false" ]]; then
     sed "s|kserve/llmisvc-controller:latest|${LLMISVC_CONTROLLER_IMAGE}|" |
     oc apply --server-side=true --force-conflicts -f -
 
+  echo "⏳ Waiting for LLMISvc CRD to be ready"
+  wait_for_crd llminferenceserviceconfigs.serving.kserve.io 90s
+
   # Install DSC/DSCI for manual installation
   echo "Installing DSC/DSCI resources..."
-  oc apply -f config/overlays/test/dsci.yaml
-  oc apply -f config/overlays/test/dsc.yaml
+  oc apply -f config/overlays/odh-test/dsci.yaml
+  oc apply -f config/overlays/odh-test/dsc.yaml
+
 else
   # ODH operator path: Copy full kustomize directory structure to operator PVC
   echo "⏳ Preparing PR manifests for ODH operator..."
@@ -152,18 +149,12 @@ else
   # Apply DSC/DSCI to trigger deployment with custom manifests
   # Sed the DSCI to use opendatahub namespace for ODH operator mode
   echo "Applying DSC/DSCI to trigger ODH operator deployment with PR manifests..."
-  sed 's/applicationsNamespace:  kserve/applicationsNamespace: opendatahub/' config/overlays/test/dsci.yaml | oc apply -f -
-  oc apply -f config/overlays/test/dsc.yaml
+  sed 's/applicationsNamespace:  kserve/applicationsNamespace: opendatahub/' config/overlays/odh-test/dsci.yaml | oc apply -f -
+  oc apply -f config/overlays/odh-test/dsc.yaml
 
   # Wait for KServe controller to be deployed by the operator
   echo "Waiting for ODH operator to deploy KServe components with PR manifests..."
   wait_for_pod_ready "${KSERVE_NAMESPACE}" "control-plane=kserve-controller-manager" 600s
-
-  # Deploy Minio for operator mode (manual mode gets it from kustomize overlay)
-  echo "Deploying Minio..."
-  kustomize build $PROJECT_ROOT/config/overlays/test/minio | \
-    sed "s/namespace: kserve/namespace: ${KSERVE_NAMESPACE}/" | \
-    oc apply -f -
 
   echo "ODH operator deployed KServe using PR manifests and images"
 fi
@@ -172,10 +163,10 @@ fi
 if skip_serverless "$1"; then
   echo "Patching RAW deployment, markers: $1"
   export OPENSHIFT_INGRESS_DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
-  cat config/overlays/test/configmap/inferenceservice-openshift-ci-raw.yaml | \
+  oc patch configmap inferenceservice-config -n ${KSERVE_NAMESPACE} --type=strategic \
+    --patch-file=<(cat config/overlays/odh-test/configmap/inferenceservice-openshift-ci-raw.yaml | \
     sed "s/namespace: kserve/namespace: ${KSERVE_NAMESPACE}/" | \
-    envsubst | \
-    oc apply -f -
+    envsubst)
   oc delete pod -n ${KSERVE_NAMESPACE} -l control-plane=kserve-controller-manager
 
   # Patch DSC only in manual mode (operator mode uses yaml files directly)
@@ -184,10 +175,10 @@ if skip_serverless "$1"; then
   fi
 else
   export OPENSHIFT_INGRESS_DOMAIN=$(oc get ingresses.config cluster -o jsonpath='{.spec.domain}')
-  cat config/overlays/test/configmap/inferenceservice-openshift-ci-serverless-predictor.yaml | \
+  oc patch configmap inferenceservice-config -n ${KSERVE_NAMESPACE} --type=strategic \
+    --patch-file=<(cat config/overlays/odh-test/configmap/inferenceservice-openshift-ci-serverless-predictor.yaml | \
     sed "s/namespace: kserve/namespace: ${KSERVE_NAMESPACE}/" | \
-    envsubst | \
-    oc apply -f -
+    envsubst)
 fi
 
 # Wait until KServe starts

@@ -23,11 +23,10 @@ import (
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
 	"github.com/kserve/kserve/pkg/apis/serving/v1beta1"
 	"github.com/kserve/kserve/pkg/constants"
+	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/autoscaler"
-	deployment "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/deployment"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/ingress"
 	"github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/otel"
-	service "github.com/kserve/kserve/pkg/controller/v1beta1/inferenceservice/reconcilers/service"
 	"github.com/kserve/kserve/pkg/credentials"
 	kserveTypes "github.com/kserve/kserve/pkg/types"
 	"github.com/kserve/kserve/pkg/webhook/admission/pod"
@@ -48,8 +47,8 @@ var log = logf.Log.WithName("RawKubeReconciler")
 type RawKubeReconciler struct {
 	client        client.Client
 	scheme        *runtime.Scheme
-	Deployment    *deployment.DeploymentReconciler
-	Service       *service.ServiceReconciler
+	Workload      reconcilers.WorkloadReconciler
+	Service       reconcilers.ServiceReconciler
 	Scaler        *autoscaler.AutoscalerReconciler
 	OtelCollector *otel.OtelReconciler
 	URL           *knapis.URL
@@ -175,7 +174,45 @@ func NewRawKubeReconciler(ctx context.Context,
 		deployConfig = nil // Use nil if config is not available
 	}
 
-	depl, err := deployment.NewDeploymentReconciler(ctx, client, clientset, scheme, resourceType, componentMeta, workerComponentMeta, componentExt, podSpec, workerPodSpec, deployConfig)
+	// Parse deployment mode
+	deploymentMode := constants.ParseDeploymentMode(componentMeta.Annotations[constants.DeploymentMode])
+
+	// Use factory to create reconcilers
+	factory := reconcilers.NewReconcilerFactory()
+
+	workloadRec, err := factory.CreateWorkloadReconciler(
+		ctx,
+		deploymentMode,
+		reconcilers.WorkloadReconcilerParams{
+			Client:              client,
+			ClientSet:           clientset,
+			Scheme:              scheme,
+			ResourceType:        resourceType,
+			ComponentMeta:       componentMeta,
+			WorkerComponentMeta: workerComponentMeta,
+			ComponentExt:        componentExt,
+			PodSpec:             podSpec,
+			WorkerPodSpec:       workerPodSpec,
+			DeployConfig:        deployConfig,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	serviceRec, err := factory.CreateServiceReconciler(
+		deploymentMode,
+		reconcilers.ServiceReconcilerParams{
+			Client:           client,
+			Scheme:           scheme,
+			ResourceType:     resourceType,
+			ComponentMeta:    componentMeta,
+			ComponentExt:     componentExt,
+			PodSpec:          podSpec,
+			MultiNodeEnabled: multiNodeEnabled,
+			ServiceConfig:    serviceConfig,
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +220,8 @@ func NewRawKubeReconciler(ctx context.Context,
 	return &RawKubeReconciler{
 		client:        client,
 		scheme:        scheme,
-		Deployment:    depl,
-		Service:       service.NewServiceReconciler(client, scheme, resourceType, componentMeta, componentExt, podSpec, multiNodeEnabled, serviceConfig),
+		Workload:      workloadRec,
+		Service:       serviceRec,
 		Scaler:        as,
 		OtelCollector: otelCollector,
 		URL:           url,
@@ -218,8 +255,8 @@ func (r *RawKubeReconciler) Reconcile(ctx context.Context) ([]*appsv1.Deployment
 		}
 	}
 
-	// reconcile Deployment
-	deploymentList, err := r.Deployment.Reconcile(ctx)
+	// reconcile Workload (Deployment)
+	deploymentList, err := r.Workload.Reconcile(ctx)
 	if err != nil {
 		return nil, err
 	}

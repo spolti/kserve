@@ -36,8 +36,9 @@ import (
 	"knative.dev/pkg/apis"
 	knapis "knative.dev/pkg/apis"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/kserve/kserve/pkg/apis/serving/v1alpha1"
@@ -216,17 +217,15 @@ func handleInferenceGraphRawDeployment(ctx context.Context, cl client.Client, cl
 		return nil, nil, errors.Wrapf(err, "fails to create NewRawKubeReconciler for inference graph")
 	}
 	// set Deployment Controller
-	for _, deployments := range reconciler.Deployment.DeploymentList {
-		if err := controllerutil.SetControllerReference(graph, deployments, scheme); err != nil {
-			return nil, reconciler.URL, errors.Wrapf(err, "fails to set deployment owner reference for inference graph")
-		}
+	if err := reconciler.Workload.SetControllerReferences(graph, scheme); err != nil {
+		return nil, reconciler.URL, errors.Wrapf(err, "fails to set deployment owner reference for inference graph")
 	}
 	// set Service Controller
-	for _, svc := range reconciler.Service.ServiceList {
+	for _, svc := range reconciler.Service.GetServiceList() {
 		svc.ObjectMeta.Annotations[constants.OpenshiftServingCertAnnotation] = graph.Name + constants.ServingCertSecretSuffix
-		if err := controllerutil.SetControllerReference(graph, svc, scheme); err != nil {
-			return nil, reconciler.URL, errors.Wrapf(err, "fails to set service owner reference for inference graph")
-		}
+	}
+	if err := reconciler.Service.SetControllerReferences(graph, scheme); err != nil {
+		return nil, reconciler.URL, errors.Wrapf(err, "fails to set service owner reference for inference graph")
 	}
 
 	// set autoscaler Controller

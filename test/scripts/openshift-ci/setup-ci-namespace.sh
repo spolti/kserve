@@ -70,6 +70,7 @@ oc apply -f "$PROJECT_ROOT/config/overlays/test/minio/minio-user-secret.yaml" -n
 echo "Installing ServingRuntimes"
 kustomize build "$PROJECT_ROOT/config/overlays/test/clusterresources" |
   sed 's/ClusterServingRuntime/ServingRuntime/' |
+  sed '/runAsUser:/d' | # remove runAs from existing servingRuntimes
   sed "s|kserve/sklearnserver:latest|${SKLEARN_IMAGE}|" |
   sed "s|kserve/storage-initializer:latest|${STORAGE_INITIALIZER_IMAGE}|" |
   oc apply -n "$NAMESPACE" -f -

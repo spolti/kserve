@@ -14,14 +14,7 @@ metadata:
 ---
 $patch: delete
 apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: llmisvc-selfsigned-issuer
-  namespace: kserve
----
-$patch: delete
-apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: llmisvc-serving-certso, we can uncomment
+  name: llmisvc-serving-cert
   namespace: kserve

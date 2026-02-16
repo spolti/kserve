@@ -32,6 +32,7 @@ import (
 	"knative.dev/pkg/apis"
 	knapis "knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -62,7 +63,7 @@ func NewRawIngressReconciler(client client.Client,
 	}, nil
 }
 
-func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.InferenceService) error {
+func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.InferenceService) (ctrl.Result, error) {
 	var err error
 	isInternal := false
 	// disable ingress creation if service is labelled with cluster local or kserve domain is cluster local
@@ -80,19 +81,19 @@ func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.Infe
 	}, existingIngress)
 	ingressIsNotFound := apierr.IsNotFound(getExistingErr)
 	if getExistingErr != nil && !ingressIsNotFound {
-		return fmt.Errorf("failed to get existing ingress: %w", getExistingErr)
+		return ctrl.Result{}, fmt.Errorf("failed to get existing ingress: %w", getExistingErr)
 	}
 
 	// ISVC is stopped, delete the ingress if it exists, otherwise, do nothing
 	forceStopRuntime := utils.GetForceStopRuntime(isvc)
 	if (getExistingErr != nil && ingressIsNotFound) && forceStopRuntime {
-		return nil
+		return ctrl.Result{}, nil
 	}
 	if forceStopRuntime {
-		if ctrl := metav1.GetControllerOf(existingIngress); ctrl != nil && ctrl.UID == isvc.UID {
+		if controller := metav1.GetControllerOf(existingIngress); controller != nil && controller.UID == isvc.UID {
 			log.Info("The InferenceService is marked as stopped — deleting its associated ingress", "name", isvc.Name)
 			if err := r.client.Delete(ctx, existingIngress); err != nil {
-				return err
+				return ctrl.Result{}, err
 			}
 		}
 
@@ -102,30 +103,30 @@ func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.Infe
 			Reason: v1beta1.StoppedISVCReason,
 		})
 
-		return nil
+		return ctrl.Result{}, nil
 	}
 
 	// Create or update ingress to match the desired state
 	if !isInternal && !r.ingressConfig.DisableIngressCreation {
 		ingress, err := createRawIngress(r.scheme, isvc, r.ingressConfig, r.isvcConfig)
 		if err != nil {
-			return err
+			return ctrl.Result{}, err
 		}
 		if ingress == nil {
-			return nil
+			return ctrl.Result{}, nil
 		}
 
 		if getExistingErr != nil && ingressIsNotFound {
 			log.Info("creating ingress", "ingressName", isvc.Name, "err", err)
 			if err := r.client.Create(ctx, ingress); err != nil {
 				log.Error(err, "Failed to create ingress", "name", ingress.Name)
-				return err
+				return ctrl.Result{}, err
 			}
 		} else if !semanticIngressEquals(ingress, existingIngress) {
 			log.Info("updating ingress", "ingressName", isvc.Name, "err", err)
 			if err := r.client.Update(ctx, ingress); err != nil {
 				log.Error(err, "Failed to update ingress", "name", ingress.Name)
-				return err
+				return ctrl.Result{}, err
 			}
 		}
 	}
@@ -137,7 +138,7 @@ func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.Infe
 
 	isvc.Status.URL, err = createRawURLODH(ctx, r.client, isvc, authEnabled)
 	if err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	internalHost := getRawServiceHost(isvc)
@@ -162,7 +163,7 @@ func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.Infe
 		Status: corev1.ConditionTrue,
 	})
 
-	return nil
+	return ctrl.Result{}, nil
 }
 
 func createRawURLODH(ctx context.Context, client client.Client, isvc *v1beta1.InferenceService, authEnabled bool) (*knapis.URL, error) {
