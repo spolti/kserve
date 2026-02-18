@@ -374,55 +374,101 @@ func IsHTTPRouteReady(route *gwapiv1.HTTPRoute) bool {
 		return false
 	}
 
-	// Check that all parent references have corresponding status entries
-	if len(route.Status.RouteStatus.Parents) != len(route.Spec.ParentRefs) {
-		// HTTPRoute is ready only when _all_ parents have accepted the route.
-		return false
+	// Check that every spec ParentRef has at least one corresponding status entry.
+	// Multiple controllers may write separate status entries for the same ParentRef,
+	// so we only require that at least one entry exists per spec ref.
+	for _, specRef := range route.Spec.ParentRefs {
+		if !hasMatchingParentStatus(specRef, route.Status.RouteStatus.Parents) {
+			return false
+		}
 	}
 
-	// Check for any non-ready conditions across all parents
-	if cond, missing := nonReadyHTTPRouteTopLevelCondition(route); cond != nil || missing {
+	return areGatewayConditionsReady(route)
+}
+
+// hasMatchingParentStatus checks whether at least one RouteParentStatus entry
+// corresponds to the given spec ParentReference and was written by a gateway
+// controller (i.e., has the Accepted condition set). Policy or extension
+// controllers may also write status entries for the same ParentRef but without
+// setting the Accepted condition, so those entries alone are not sufficient.
+func hasMatchingParentStatus(specRef gwapiv1.ParentReference, parents []gwapiv1.RouteParentStatus) bool {
+	for i := range parents {
+		if parentRefMatches(specRef, parents[i].ParentRef) &&
+			meta.FindStatusCondition(parents[i].Conditions, string(gwapiv1.RouteConditionAccepted)) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// parentRefMatches returns true when two ParentReferences identify the same parent,
+// applying Gateway API defaulting rules for optional fields.
+// Note: Namespace comparison uses empty string default. In practice, both spec and status
+// refs should have consistent namespace handling (either both explicit or both implicit).
+func parentRefMatches(a, b gwapiv1.ParentReference) bool {
+	return a.Name == b.Name &&
+		ptr.Deref(a.Group, gwapiv1.GroupName) == ptr.Deref(b.Group, gwapiv1.GroupName) &&
+		ptr.Deref(a.Kind, "Gateway") == ptr.Deref(b.Kind, "Gateway") &&
+		ptr.Deref(a.Namespace, "") == ptr.Deref(b.Namespace, "") &&
+		ptr.Deref(a.SectionName, "") == ptr.Deref(b.SectionName, "") &&
+		ptr.Deref(a.Port, 0) == ptr.Deref(b.Port, 0)
+}
+
+// areGatewayConditionsReady reports whether all gateway controller entries in the
+// HTTPRoute's status have Accepted and ResolvedRefs set to True and up-to-date.
+// Status entries without the Accepted condition (e.g. from policy controllers) are skipped.
+// A condition is stale when its ObservedGeneration is less than the route's Generation.
+func areGatewayConditionsReady(route *gwapiv1.HTTPRoute) bool {
+	if route == nil {
 		return false
 	}
-
+	for _, parent := range route.Status.RouteStatus.Parents {
+		acceptedCond := meta.FindStatusCondition(parent.Conditions, string(gwapiv1.RouteConditionAccepted))
+		if acceptedCond == nil {
+			continue
+		}
+		stale := acceptedCond.ObservedGeneration > 0 && acceptedCond.ObservedGeneration < route.Generation
+		if acceptedCond.Status != metav1.ConditionTrue || stale {
+			return false
+		}
+		resolvedRefCond := meta.FindStatusCondition(parent.Conditions, string(gwapiv1.RouteConditionResolvedRefs))
+		if resolvedRefCond == nil {
+			return false
+		}
+		stale = resolvedRefCond.ObservedGeneration > 0 && resolvedRefCond.ObservedGeneration < route.Generation
+		if resolvedRefCond.Status != metav1.ConditionTrue || stale {
+			return false
+		}
+	}
 	return true
 }
 
-// nonReadyHTTPRouteTopLevelCondition checks for any non-ready conditions in an HTTPRoute
-// Returns the first problematic condition found, or indicates if any conditions are missing
-// A condition is considered stale if its ObservedGeneration is less than the route's current Generation
-func nonReadyHTTPRouteTopLevelCondition(route *gwapiv1.HTTPRoute) (*metav1.Condition, bool) {
+// findNonReadyGatewayCondition returns the first non-ready or stale condition from a
+// gateway controller entry in the HTTPRoute's status, or nil if none found.
+// Status entries without the Accepted condition (e.g. from policy controllers) are skipped.
+func findNonReadyGatewayCondition(route *gwapiv1.HTTPRoute) *metav1.Condition {
 	if route == nil {
-		return nil, true
+		return nil
 	}
-
 	for _, parent := range route.Status.RouteStatus.Parents {
-		// Look for the "Accepted" condition which indicates Gateway acceptance
 		acceptedCond := meta.FindStatusCondition(parent.Conditions, string(gwapiv1.RouteConditionAccepted))
 		if acceptedCond == nil {
-			// Missing condition indicates the route is not ready
-			return nil, true
+			continue
 		}
-		// Check if condition is stale (based on older generation)
-		staleCondition := acceptedCond.ObservedGeneration > 0 && acceptedCond.ObservedGeneration < route.Generation
-		if acceptedCond.Status != metav1.ConditionTrue || staleCondition {
-			return acceptedCond, false
+		stale := acceptedCond.ObservedGeneration > 0 && acceptedCond.ObservedGeneration < route.Generation
+		if acceptedCond.Status != metav1.ConditionTrue || stale {
+			return acceptedCond
 		}
-
 		resolvedRefCond := meta.FindStatusCondition(parent.Conditions, string(gwapiv1.RouteConditionResolvedRefs))
 		if resolvedRefCond == nil {
-			// Missing condition indicates the route is not ready
-			return nil, true
+			continue
 		}
-
-		// Check if condition is stale (based on older generation)
-		staleCondition = resolvedRefCond.ObservedGeneration > 0 && resolvedRefCond.ObservedGeneration < route.Generation
-		if resolvedRefCond.Status != metav1.ConditionTrue || staleCondition {
-			return resolvedRefCond, false
+		stale = resolvedRefCond.ObservedGeneration > 0 && resolvedRefCond.ObservedGeneration < route.Generation
+		if resolvedRefCond.Status != metav1.ConditionTrue || stale {
+			return resolvedRefCond
 		}
 	}
-
-	return nil, false
+	return nil
 }
 
 // IsInferencePoolReady checks if an InferencePool has been accepted by all parents
