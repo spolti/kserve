@@ -146,7 +146,10 @@ func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.Infe
 	}
 
 	if authEnabled {
-		isvc.Status.Address.URL.Host += ":" + strconv.Itoa(constants.OauthProxyPort)
+		// When auth is enabled, the OAuth proxy port takes precedence over any
+		// port set by createAddress (e.g. :8080 for headless services).
+		host := getRawServiceHost(isvc)
+		isvc.Status.Address.URL.Host = host + ":" + strconv.Itoa(constants.OauthProxyPort)
 		isvc.Status.Address.URL.Scheme = "https"
 	}
 
@@ -157,7 +160,6 @@ func (r *RawIngressReconciler) Reconcile(ctx context.Context, isvc *v1beta1.Infe
 
 	return ctrl.Result{}, nil
 }
-
 
 func createRawURLODH(ctx context.Context, client client.Client, isvc *v1beta1.InferenceService, authEnabled bool) (*knapis.URL, error) {
 	// upstream implementation

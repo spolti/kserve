@@ -347,7 +347,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-default.example.com",
-				"raw-foo-predictor-default.example.com", "")
+				"raw-foo-predictor-default.example.com", "8080")
 
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
@@ -781,7 +781,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-customized-default.example.com",
-				"raw-foo-customized-predictor-default.example.com", "")
+				"raw-foo-customized-predictor-default.example.com", "8080")
 
 			// Check that the ISVC was updated
 			actualIsvc := &v1beta1.InferenceService{}
@@ -1224,7 +1224,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-2-default.example.com",
-				"raw-foo-2-predictor-default.example.com", "")
+				"raw-foo-2-predictor-default.example.com", "8080")
 
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
@@ -3841,7 +3841,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-no-ingress-class-default.example.com",
-				"raw-foo-no-ingress-class-predictor-default.example.com", "")
+				"raw-foo-no-ingress-class-predictor-default.example.com", "8080")
 
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
@@ -4205,7 +4205,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "model.default.example.com",
-				"model-predictor.default.example.com", "")
+				"model-predictor.default.example.com", "8080")
 
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
@@ -4889,7 +4889,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-trans-default.example.com",
-				"raw-foo-trans-predictor-default.example.com", "")
+				"raw-foo-trans-predictor-default.example.com", "8080")
 			expectedIsvcStatus.Conditions = append(expectedIsvcStatus.Conditions, apis.Condition{
 				Type:     v1beta1.TransformerReady,
 				Status:   "True",
@@ -5627,7 +5627,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-exp-default.example.com",
-				"raw-foo-exp-predictor-default.example.com", "")
+				"raw-foo-exp-predictor-default.example.com", "8080")
 			expectedIsvcStatus.Conditions = append([]apis.Condition{
 				{
 					Type:     v1beta1.ExplainerReady,
@@ -6116,7 +6116,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-path-default.example.com",
-				"raw-foo-path-predictor-default.example.com", "")
+				"raw-foo-path-predictor-default.example.com", "8080")
 
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
@@ -6852,7 +6852,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			// verify if InferenceService status is updated
 			// TODO update
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-trans-path-default.example.com",
-				"raw-foo-trans-path-predictor-default.example.com", "")
+				"raw-foo-trans-path-predictor-default.example.com", "8080")
 			expectedIsvcStatus.Conditions = append(expectedIsvcStatus.Conditions, apis.Condition{
 				Type:     v1beta1.TransformerReady,
 				Status:   "True",
@@ -7682,7 +7682,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-exp-path-default.example.com",
-				"raw-foo-exp-path-predictor-default.example.com", "")
+				"raw-foo-exp-path-predictor-default.example.com", "8080")
 			expectedIsvcStatus.Conditions = append([]apis.Condition{
 				{
 					Type:     v1beta1.ExplainerReady,
@@ -8284,7 +8284,7 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(actualIngress.Spec).To(Equal(expectedIngress.Spec))
 			// verify if InferenceService status is updated
 			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-foo-predictor.default.svc.cluster.local",
-				"raw-foo-predictor-default.example.com", "")
+				"raw-foo-predictor-default.example.com", "8080")
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(context.TODO(), serviceKey, isvc); err != nil {
@@ -10186,8 +10186,8 @@ var _ = Describe("v1beta1 inference service controller", func() {
 			Expect(k8sClient.Status().Update(ctx, updatedDeployment)).NotTo(HaveOccurred())
 
 			// Verify status.address.url includes port 8080
-			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-auth-default.example.com",
-				"raw-auth-predictor-default.example.com", "8080")
+			expectedIsvcStatus := getExpectedIsvcStatus(serviceKey, "http", "raw-headless-port-predictor.default.svc.cluster.local",
+				"raw-headless-port-predictor-default.example.com", "8080")
 			Eventually(func() string {
 				isvc := &v1beta1.InferenceService{}
 				if err := k8sClient.Get(ctx, serviceKey, isvc); err != nil {
