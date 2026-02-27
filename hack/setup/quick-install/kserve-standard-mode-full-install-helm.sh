@@ -517,7 +517,7 @@ KNATIVE_SERVING_VERSION=1.15.2
 KEDA_OTEL_ADDON_VERSION=v0.0.6
 KSERVE_VERSION=v0.16.0
 ISTIO_VERSION=1.27.1
-KEDA_VERSION=2.17.2
+KEDA_VERSION=2.17.3
 OPENTELEMETRY_OPERATOR_VERSION=0.74.3
 LWS_VERSION=v0.7.0
 GATEWAY_API_VERSION=v1.3.0
@@ -644,7 +644,7 @@ install_kustomize() {
     log_info "Installing Kustomize ${KUSTOMIZE_VERSION} for ${os}/${arch}..."
 
     if command -v kustomize &>/dev/null; then
-        local current_version=$(kustomize version --short 2>/dev/null | grep -oP 'v[0-9.]+')
+        local current_version=$(kustomize version --short 2>/dev/null | grep -oE 'v[0-9.]+')
         if [[ -n "$current_version" ]] && version_gte "$current_version" "$KUSTOMIZE_VERSION"; then
             log_info "Kustomize ${current_version} is already installed (>= ${KUSTOMIZE_VERSION})"
             return 0
