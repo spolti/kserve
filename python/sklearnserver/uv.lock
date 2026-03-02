@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -1032,6 +1032,7 @@ source = { directory = "../kserve" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cloudevents" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "grpc-interceptor" },
     { name = "grpcio" },
@@ -1062,6 +1063,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.3" },
     { name = "asgi-logger", marker = "extra == 'logging'", specifier = ">=0.1.0,<1.0.0" },
     { name = "cloudevents", specifier = ">=1.6.2,<2.0.0" },
+    { name = "cryptography", specifier = ">=46.0.5" },
     { name = "fastapi", specifier = ">=0.115.3,!=1.0" },
     { name = "grpc-interceptor", specifier = ">=0.15.4,<1.0.0" },
     { name = "grpcio", specifier = ">=1.64.1,<2.0.0" },
@@ -1118,6 +1120,7 @@ dependencies = [
     { name = "azure-storage-blob" },
     { name = "azure-storage-file-share" },
     { name = "boto3" },
+    { name = "cryptography" },
     { name = "dulwich" },
     { name = "google-cloud-storage" },
     { name = "huggingface-hub" },
@@ -1131,6 +1134,7 @@ requires-dist = [
     { name = "azure-storage-blob", specifier = ">=12.20.0,<13.0.0" },
     { name = "azure-storage-file-share", specifier = ">=12.16.0,<13.0.0" },
     { name = "boto3", specifier = ">=1.29.0,<2.0.0" },
+    { name = "cryptography", specifier = ">=46.0.5" },
     { name = "dulwich", specifier = ">=0.21.0" },
     { name = "google-cloud-storage", specifier = ">=2.14.0,<3.0.0" },
     { name = "huggingface-hub", extras = ["hf-transfer"], specifier = ">=0.32.0" },
