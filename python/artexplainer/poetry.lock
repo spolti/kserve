@@ -1287,6 +1287,7 @@ protobuf = "^5.27.1"
 psutil = "^5.9.6"
 pydantic = "^2.5.0"
 python-dateutil = "^2.8.0"
+python-multipart = ">=0.0.22"
 pyyaml = "^6.0.0"
 six = "^1.16.0"
 starlette = "0.49.1"
@@ -2573,6 +2574,17 @@ files = [
 
 [package.extras]
 cli = ["click (>=5.0)"]
+
+[[package]]
+name = "python-multipart"
+version = "0.0.22"
+description = "A streaming multipart parser for Python"
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "python_multipart-0.0.22-py3-none-any.whl", hash = "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155"},
+    {file = "python_multipart-0.0.22.tar.gz", hash = "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58"},
+]
 
 [[package]]
 name = "pytz"
