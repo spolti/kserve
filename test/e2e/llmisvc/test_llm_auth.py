@@ -27,10 +27,13 @@ from .fixtures import (
 )
 from .test_llm_inference_service import (
     TestCase,
+    completions_payload,
     create_llmisvc,
+    create_response_assertion,
     delete_llmisvc,
     get_llmisvc,
     wait_for_llm_isvc_ready,
+    wait_for_model_response,
     get_llm_service_url,
     _collect_diagnostics,
 )
@@ -210,7 +213,10 @@ def cleanup_service_account(
                     "workload-single-cpu",
                     "model-fb-opt-125m",
                 ],
+                endpoint="/v1/completions",
                 prompt="KServe is a",
+                payload_formatter=completions_payload,
+                response_assertion=create_response_assertion(),
                 service_name="auth-enabled-test",
             ),
             marks=[
@@ -277,20 +283,14 @@ def test_llm_auth_enabled_requires_token(test_case: TestCase):
             f"✅ Request without token rejected: {response_no_token.status_code}"
         )
 
-        # Test 2: Request WITH valid token should succeed
+        # Test 2: Request WITH valid token should succeed (retries for transient post-Ready errors)
         logger.info("Testing request WITH valid token (should succeed)")
-        response_with_token = requests.post(
-            completion_url,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-            },
-            json=test_payload,
-            timeout=test_case.response_timeout,
+        wait_for_model_response(
+            kserve_client,
+            test_case,
+            test_case.wait_timeout,
+            extra_headers={"Authorization": f"Bearer {token}"},
         )
-        assert (
-            response_with_token.status_code == 200
-        ), f"Expected 200 with token, got {response_with_token.status_code}: {response_with_token.text}"
         logger.info("✅ Request with valid token succeeded")
 
         logger.info("✅ Auth enforcement test passed")
