@@ -484,6 +484,7 @@ def wait_for_model_response(
     kserve_client: KServeClient,
     test_case: TestCase,
     timeout_seconds: int = 600,
+    extra_headers: Optional[Dict[str, str]] = None,
 ) -> str:
     def assert_model_responds():
         try:
@@ -492,6 +493,10 @@ def wait_for_model_response(
             raise AssertionError(f"❌ Failed to get service URL: {e}") from e
 
         model_url = service_url + test_case.endpoint
+
+        headers = {"Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
 
         test_payload = None
         if test_case.payload_formatter is not None:
@@ -504,7 +509,7 @@ def wait_for_model_response(
                 )
                 response = requests.post(
                     model_url,
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     json=test_payload,
                     timeout=test_case.response_timeout,
                 )
@@ -515,7 +520,7 @@ def wait_for_model_response(
                 print(f"Calling LLM service - GET {model_url} with empty payload")
                 response = requests.get(
                     model_url,
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     timeout=test_case.response_timeout,
                 )
 
