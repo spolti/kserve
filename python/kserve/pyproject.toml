@@ -62,6 +62,8 @@ cryptography = ">=46.0.5"
 # CVE-2026-24486 Python-Multipart has Arbitrary File Write via Non-Default Configuration
 # Pinning because it is a transitive dependency.
 python-multipart = ">=0.0.22"
+# CVE-2026-25990 Pillow: Out-of-bounds Write via Specially Crafted PSD Image
+Pillow = ">=12.1.1"
 
 # Storage dependencies. They can be opted into by apps.
 requests = { version = "^2.32.2", optional = true }
