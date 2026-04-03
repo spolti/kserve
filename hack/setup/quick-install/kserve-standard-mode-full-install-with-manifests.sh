@@ -763,7 +763,7 @@ install_helm() {
     rm -rf "${temp_dir}"
 
     log_success "Successfully installed Helm ${HELM_VERSION} to ${BIN_DIR}/helm"
-    helm version
+    "${BIN_DIR}/helm" version
 }
 
 # ----------------------------------------
@@ -823,7 +823,7 @@ install_kustomize() {
     rm -rf "${temp_dir}"
 
     log_success "Successfully installed Kustomize ${KUSTOMIZE_VERSION} to ${BIN_DIR}/kustomize"
-    kustomize version
+    "${BIN_DIR}/kustomize" version
 }
 
 # ----------------------------------------
@@ -841,7 +841,7 @@ install_yq() {
     log_info "Installing yq ${YQ_VERSION} for ${os}/${arch}..."
 
     if [[ -x "${BIN_DIR}/yq" ]]; then
-        local current_version=$("${BIN_DIR}/yq" --version 2>&1 | awk '/version [v0-9]/ {print $NF}')
+        local current_version=$("${BIN_DIR}/yq" --version 2>&1 | awk 'match($0, /v[0-9.]+/) {print substr($0, RSTART, RLENGTH)}')
         # Normalize version format (add 'v' prefix if missing)
         [[ -n "$current_version" && "$current_version" != v* ]] && current_version="v${current_version}"
         if [[ -n "$current_version" ]] && version_gte "$current_version" "$YQ_VERSION"; then
@@ -947,13 +947,13 @@ uninstall_kserve_kustomize() {
         # Uninstall overlay resources in reverse order
         for ((i=${#TARGET_OVERLAY_DIRS[@]}-1; i>=0; i--)); do
             log_info "Uninstalling resources from ${TARGET_OVERLAY_DIRS[$i]}..."
-            kubectl kustomize "${TARGET_OVERLAY_DIRS[$i]}" | kubectl delete -f - --force --grace-period=0 2>/dev/null || true
+            kustomize build "${TARGET_OVERLAY_DIRS[$i]}" | kubectl delete -f - --force --grace-period=0 2>/dev/null || true
         done
 
         # Uninstall CRDs in reverse order
         for ((i=${#TARGET_CRD_DIRS[@]}-1; i>=0; i--)); do
             log_info "Uninstalling CRDs from ${TARGET_CRD_DIRS[$i]}..."
-            kubectl kustomize "${TARGET_CRD_DIRS[$i]}" | kubectl delete -f - --force --grace-period=0 2>/dev/null || true
+            kustomize build "${TARGET_CRD_DIRS[$i]}" | kubectl delete -f - --force --grace-period=0 2>/dev/null || true
         done
     fi
 
