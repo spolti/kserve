@@ -277,6 +277,9 @@ func (e *Config) Start(ctx context.Context) *Client {
 // handles may not yet be populated (processState is unexported).
 // ControlPlane.Stop() is called afterwards to clean up temporary directories.
 func stopControlPlane(controlPlane *envtest.ControlPlane) {
+	if controlPlane == nil {
+		return
+	}
 	if controlPlane.APIServer != nil {
 		forceKillByPattern(controlPlane.APIServer.Path, controlPlane.APIServer.CertDir)
 	}
@@ -284,7 +287,14 @@ func stopControlPlane(controlPlane *envtest.ControlPlane) {
 		forceKillByPattern(controlPlane.Etcd.Path, controlPlane.Etcd.DataDir)
 	}
 
-	_ = controlPlane.Stop()
+	// After a failed Start(), controller-runtime may leave APIServer partially
+	// initialized; Stop() can panic (nil Authn). Best-effort cleanup only.
+	func() {
+		defer func() {
+			_ = recover()
+		}()
+		_ = controlPlane.Stop()
+	}()
 }
 
 // forceKillByPattern kills processes matching the given binary path and unique argument.
