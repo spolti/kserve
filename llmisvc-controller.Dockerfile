@@ -33,10 +33,10 @@ COPY pkg/    pkg/
 COPY LICENSE LICENSE
 RUN --mount=type=cache,target=/go/pkg/mod \
     go-licenses check ./cmd/${CMD} ./pkg/... --disallowed_types="forbidden,unknown" && \
-    go-licenses save --save_path /third_party/library ./cmd/${CMD}
+    go-licenses save --save_path third_party/library ./cmd/${CMD}
 
 # Copy the controller-manager into a thin image
 FROM gcr.io/distroless/static:nonroot
-COPY --from=license /third_party /third_party
+COPY --from=license /go/src/github.com/kserve/kserve/third_party /third_party
 COPY --from=builder /go/src/github.com/kserve/kserve/manager /manager
 ENTRYPOINT ["/manager"]

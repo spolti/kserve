@@ -32,7 +32,7 @@ COPY pkg/    pkg/
 COPY LICENSE LICENSE
 RUN --mount=type=cache,target=/go/pkg/mod \
     go-licenses check ./cmd/${CMD} ./pkg/... --disallowed_types="forbidden,unknown" && \
-    go-licenses save --save_path /third_party/library ./cmd/${CMD}
+    go-licenses save --save_path third_party/library ./cmd/${CMD}
 
 # Copy the inference-router into a thin image
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
@@ -41,7 +41,7 @@ RUN microdnf install -y --disablerepo=* --enablerepo=ubi-9-baseos-rpms shadow-ut
     useradd kserve -m -u 1000
 RUN microdnf remove -y shadow-utils
 
-COPY --from=license /third_party /third_party
+COPY --from=license /go/src/github.com/kserve/kserve/third_party /third_party
 
 WORKDIR /ko-app
 

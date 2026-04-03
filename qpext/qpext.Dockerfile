@@ -27,11 +27,11 @@ COPY qpext/cmd/qpext cmd/qpext
 COPY qpext/logger.go logger.go
 COPY LICENSE LICENSE
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go-licenses save --save_path /third_party/library ./cmd/qpext
+    go-licenses save --save_path third_party/library ./cmd/qpext
 
 # ---- Runtime ----
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /ko-app
-COPY --from=license /third_party /third_party
+COPY --from=license /go/src/github.com/kserve/kserve/qpext/third_party /third_party
 COPY --from=builder /go/src/github.com/kserve/kserve/qpext/qpext /ko-app/
 ENTRYPOINT ["/ko-app/qpext"]
