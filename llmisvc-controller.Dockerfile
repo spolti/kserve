@@ -39,4 +39,5 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static:nonroot
 COPY --from=license /go/src/github.com/kserve/kserve/third_party /third_party
 COPY --from=builder /go/src/github.com/kserve/kserve/manager /manager
+USER 1000:1000
 ENTRYPOINT ["/manager"]
