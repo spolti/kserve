@@ -3986,6 +3986,25 @@ spec:
               backendRequest: 0s
               request: 0s
           - backendRefs:
+            - group: inference.networking.k8s.io
+              kind: InferencePool
+              name: '{{ ChildName .ObjectMeta.Name `-inference-pool` }}'
+              port: 8000
+              weight: 1
+            filters:
+            - type: URLRewrite
+              urlRewrite:
+                path:
+                  replacePrefixMatch: /v1/responses
+                  type: ReplacePrefixMatch
+            matches:
+            - path:
+                type: PathPrefix
+                value: /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }}/v1/responses
+            timeouts:
+              backendRequest: 0s
+              request: 0s
+          - backendRefs:
             - kind: Service
               name: '{{ ChildName .ObjectMeta.Name `-kserve-workload-svc` }}'
               port: 8000
@@ -38323,7 +38342,8 @@ data:
            "domainTemplate": "{{ .Name }}-{{ .Namespace }}.{{ .IngressDomain }}",
            "urlScheme": "http",
            "disableIstioVirtualHost": false,
-           "disableIngressCreation": false
+           "disableIngressCreation": false,
+           "disableHTTPRouteTimeout": false
        }
      ingress: |-
        {
@@ -38398,6 +38418,10 @@ data:
 
            # disableIngressCreation controls whether to disable ingress creation for raw deployment mode.
            "disableIngressCreation": false,
+
+           # disableHTTPRouteTimeout controls whether to omit the timeout field from HTTPRoute rules.
+           # Set to true for Gateway controllers (e.g. GKE Gateway) that do not support the optional timeouts field.
+           "disableHTTPRouteTimeout": false,
 
            # pathTemplate specifies the template for generating path based url for each inference service.
            # The following variables can be used in the template for generating url.
@@ -38718,7 +38742,8 @@ data:
         "domainTemplate": "{{ .Name }}-{{ .Namespace }}.{{ .IngressDomain }}",
         "urlScheme": "http",
         "disableIstioVirtualHost": false,
-        "disableIngressCreation": false
+        "disableIngressCreation": false,
+        "disableHTTPRouteTimeout": false
     }
   localModel: |-
     {
