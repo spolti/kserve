@@ -168,7 +168,7 @@ func main() {
 
 	llmSvcCacheSelector, _ := metav1.LabelSelectorAsSelector(&llmisvc.ChildResourcesLabelSelector)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgrOpts := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhook.NewServer(webhook.Options{Port: options.webhookPort, TLSOpts: tlsOpts}),
@@ -203,7 +203,13 @@ func main() {
 				},
 			},
 		},
-	})
+	}
+
+	if err := customizeManagerOptions(&mgrOpts); err != nil {
+		setupLog.Error(err, "failed to apply distribution-specific manager options")
+		os.Exit(1)
+	}
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)

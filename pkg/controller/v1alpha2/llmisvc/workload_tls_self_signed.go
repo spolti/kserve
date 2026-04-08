@@ -91,7 +91,8 @@ func (r *LLMISVCReconciler) reconcileSelfSignedCertsSecret(ctx context.Context, 
 }
 
 // certBundle holds TLS certificate material.
-// CACert is nil for self-signed certificates (where the cert is its own CA).
+// CACert holds the CA certificate. For self-signed certs it equals Cert (the cert is its own CA).
+// Distro hooks may supply a separate CA cert.
 type certBundle struct {
 	Key    []byte
 	Cert   []byte
