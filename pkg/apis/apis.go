@@ -20,6 +20,8 @@ limitations under the License.
 // Package apis contains Kubernetes API groups.
 package apis
 
+// false
+
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 
