@@ -78,7 +78,7 @@ const (
 // ODH Connections API
 const ODHS3Endpoint = "AWS_S3_ENDPOINT"
 
-// TLS infrastructure for service-ca bundle mounting and transformer-to-predictor communication
+// TLS infrastructure for service-ca bundle mounting and transformer-to-predictor communication (OpenShift-specific)
 const (
 	ServiceCaBundleVolumeName = "openshift-service-ca-bundle"
 	ServiceCaBundleMountPath  = "/etc/odh/openshift-service-ca-bundle"
