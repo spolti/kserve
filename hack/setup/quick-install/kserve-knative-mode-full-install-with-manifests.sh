@@ -633,8 +633,7 @@ export RELEASE
 #================================================
 
 GOLANGCI_LINT_VERSION=v2.9.0
-CONTROLLER_TOOLS_VERSION=v0.19.0
-ENVTEST_VERSION=release-0.19
+CONTROLLER_TOOLS_VERSION=v0.21.0
 YQ_VERSION=v4.52.1
 HELM_VERSION=v3.16.3
 KUSTOMIZE_VERSION=v5.8.1
@@ -647,17 +646,17 @@ PINACT_VERSION=v3.9.0
 KIND_VERSION=v0.30.0
 CERT_MANAGER_VERSION=v1.17.0
 ENVOY_GATEWAY_VERSION=v1.8.1
-ENVOY_AI_GATEWAY_VERSION=v1.0.0
+ENVOY_AI_GATEWAY_VERSION=v1.1.0
 KNATIVE_OPERATOR_VERSION=v1.21.1
 KNATIVE_SERVING_VERSION=1.21.1
 KEDA_OTEL_ADDON_VERSION=v0.0.6
 PROMETHEUS_VERSION=83.4.0
 PROMETHEUS_ADAPTER_VERSION=5.3.0
 JAEGER_VERSION=4.7.0
-KSERVE_VERSION=v0.20.0
+KSERVE_VERSION=v0.21.0-rc0
 ISTIO_VERSION=1.27.1
-KEDA_VERSION=2.18.0
-OPENTELEMETRY_OPERATOR_VERSION=0.74.3
+KEDA_VERSION=2.20.2
+OPENTELEMETRY_OPERATOR_VERSION=0.114.1
 LWS_VERSION=v0.8.0
 GATEWAY_API_VERSION=v1.5.1
 GIE_VERSION=v1.5.0
@@ -2102,6 +2101,19 @@ spec:
 apiVersion: serving.kserve.io/v1alpha1
 kind: ClusterServingRuntime
 metadata:
+  name: kserve-llm-sglang
+spec:
+  containers:
+  - image: lmsysorg/sglang:v0.5.14
+    name: main
+  supportedModelFormats:
+  - autoSelect: false
+    name: sglang
+    version: "1"
+---
+apiVersion: serving.kserve.io/v1alpha1
+kind: ClusterServingRuntime
+metadata:
   annotations:
     serving.kserve.io/server-type: mlserver
   name: kserve-mlserver
@@ -2634,6 +2646,43 @@ spec:
       - /bin/bash
       - -c
       - |-
+        # Spyre architecture-specific setup for ppc64le/s390x
+        if [ -d /opt/ibm/spyre ]; then
+          ARCH="$(arch)"
+          case "${ARCH}" in
+            ppc64le)
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            s390x)
+              export FLEX_DEVICE=VF
+              if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                source /etc/profile.d/ibm-aiu-setup.sh
+              fi
+              export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+              if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                  export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                else
+                  echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                  rm -f "$HOME/.senlib.json"
+                fi
+              else
+                echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+              fi
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            x86_64)
+              export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+              ;;
+          esac
+        fi
+
         if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
           source /etc/profile.d/ibm-aiu-setup.sh
         fi
@@ -2801,6 +2850,7 @@ spec:
         eval "exec vllm serve /mnt/models \
           --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
           --port 8001 \
+          --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
           ${ACCESS_LOG_ARGS} \
           ${SHUTDOWN_TIMEOUT_ARGS} \
           ${KV_TRANSFER_ARGS} \
@@ -2970,6 +3020,43 @@ spec:
       - /bin/bash
       - -c
       - |-
+        # Spyre architecture-specific setup for ppc64le/s390x
+        if [ -d /opt/ibm/spyre ]; then
+          ARCH="$(arch)"
+          case "${ARCH}" in
+            ppc64le)
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            s390x)
+              export FLEX_DEVICE=VF
+              if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                source /etc/profile.d/ibm-aiu-setup.sh
+              fi
+              export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+              if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                  export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                else
+                  echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                  rm -f "$HOME/.senlib.json"
+                fi
+              else
+                echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+              fi
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            x86_64)
+              export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+              ;;
+          esac
+        fi
+
         if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
           source /etc/profile.d/ibm-aiu-setup.sh
         fi
@@ -3160,13 +3247,14 @@ spec:
           /mnt/models \
           --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
           --port 8001 \
+          --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
           --api-server-count ${VLLM_API_SERVER_COUNT:-8} \
-          {{- if .Spec.Parallelism.Expert -}}--enable-expert-parallel{{- end }} \
-          {{- if .Spec.Parallelism.Tensor -}}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
-          --data-parallel-size {{ or .Spec.Parallelism.Data 1 }} \
-          --data-parallel-size-local {{ or .Spec.Parallelism.DataLocal 1 }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Expert -}}--enable-expert-parallel{{- end }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Tensor -}}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
+          --data-parallel-size {{ or (and .Spec.Parallelism .Spec.Parallelism.Data) 1 }} \
+          --data-parallel-size-local {{ or (and .Spec.Parallelism .Spec.Parallelism.DataLocal) 1 }} \
           --data-parallel-address ${DP_ADDRESS} \
-          --data-parallel-rpc-port {{ if .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
+          --data-parallel-rpc-port {{ if and .Spec.Parallelism .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
           --data-parallel-start-rank $START_RANK \
           ${ACCESS_LOG_ARGS} \
           ${SHUTDOWN_TIMEOUT_ARGS} \
@@ -3332,6 +3420,43 @@ spec:
       - /bin/bash
       - -c
       - |-
+        # Spyre architecture-specific setup for ppc64le/s390x
+        if [ -d /opt/ibm/spyre ]; then
+          ARCH="$(arch)"
+          case "${ARCH}" in
+            ppc64le)
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            s390x)
+              export FLEX_DEVICE=VF
+              if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                source /etc/profile.d/ibm-aiu-setup.sh
+              fi
+              export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+              if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                  export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                else
+                  echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                  rm -f "$HOME/.senlib.json"
+                fi
+              else
+                echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+              fi
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            x86_64)
+              export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+              ;;
+          esac
+        fi
+
         if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
           source /etc/profile.d/ibm-aiu-setup.sh
         fi
@@ -3478,7 +3603,7 @@ spec:
           fi
         fi
 
-        START_RANK=$(( ${LWS_WORKER_INDEX:-0} * {{ or .Spec.Parallelism.DataLocal 1 }} ))
+        START_RANK=$(( ${LWS_WORKER_INDEX:-0} * {{ or (and .Spec.Parallelism .Spec.Parallelism.DataLocal) 1 }} ))
 
         # --disable-access-log-for-endpoints landed in vLLM 0.16.0 (vllm-project/vllm#30011).
         # Older versions still need the blanket --disable-uvicorn-access-log.
@@ -3522,12 +3647,13 @@ spec:
           /mnt/models \
           --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
           --port 8001 \
-          {{- if .Spec.Parallelism.Expert }}--enable-expert-parallel{{- end }} \
-          {{- if .Spec.Parallelism.Tensor }}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
-          --data-parallel-size {{ or .Spec.Parallelism.Data 1 }} \
-          --data-parallel-size-local {{ or .Spec.Parallelism.DataLocal 1 }} \
+          --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Expert }}--enable-expert-parallel{{- end }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Tensor }}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
+          --data-parallel-size {{ or (and .Spec.Parallelism .Spec.Parallelism.Data) 1 }} \
+          --data-parallel-size-local {{ or (and .Spec.Parallelism .Spec.Parallelism.DataLocal) 1 }} \
           --data-parallel-address ${DP_ADDRESS} \
-          --data-parallel-rpc-port {{ if .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
+          --data-parallel-rpc-port {{ if and .Spec.Parallelism .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
           --data-parallel-start-rank $START_RANK \
           --headless \
           ${ACCESS_LOG_ARGS} \
@@ -3622,6 +3748,43 @@ spec:
         - /bin/bash
         - -c
         - |-
+          # Spyre architecture-specific setup for ppc64le/s390x
+          if [ -d /opt/ibm/spyre ]; then
+            ARCH="$(arch)"
+            case "${ARCH}" in
+              ppc64le)
+                if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                  . /opt/rh/gcc-toolset-14/enable
+                  export PATH
+                fi
+                ;;
+              s390x)
+                export FLEX_DEVICE=VF
+                if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                  source /etc/profile.d/ibm-aiu-setup.sh
+                fi
+                export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+                if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                  if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                    export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                  else
+                    echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                    rm -f "$HOME/.senlib.json"
+                  fi
+                else
+                  echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+                fi
+                if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                  . /opt/rh/gcc-toolset-14/enable
+                  export PATH
+                fi
+                ;;
+              x86_64)
+                export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+                ;;
+            esac
+          fi
+
           if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
             source /etc/profile.d/ibm-aiu-setup.sh
           fi
@@ -3789,6 +3952,7 @@ spec:
           eval "exec vllm serve /mnt/models \
             --served-model-name "{{ .Spec.Model.Name }}" \
             --port 8000 \
+            --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
             ${ACCESS_LOG_ARGS} \
             ${SHUTDOWN_TIMEOUT_ARGS} \
             ${KV_TRANSFER_ARGS} \
@@ -3899,6 +4063,43 @@ spec:
         - /bin/bash
         - -c
         - |-
+          # Spyre architecture-specific setup for ppc64le/s390x
+          if [ -d /opt/ibm/spyre ]; then
+            ARCH="$(arch)"
+            case "${ARCH}" in
+              ppc64le)
+                if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                  . /opt/rh/gcc-toolset-14/enable
+                  export PATH
+                fi
+                ;;
+              s390x)
+                export FLEX_DEVICE=VF
+                if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                  source /etc/profile.d/ibm-aiu-setup.sh
+                fi
+                export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+                if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                  if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                    export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                  else
+                    echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                    rm -f "$HOME/.senlib.json"
+                  fi
+                else
+                  echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+                fi
+                if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                  . /opt/rh/gcc-toolset-14/enable
+                  export PATH
+                fi
+                ;;
+              x86_64)
+                export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+                ;;
+            esac
+          fi
+
           if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
             source /etc/profile.d/ibm-aiu-setup.sh
           fi
@@ -4089,13 +4290,14 @@ spec:
             /mnt/models \
             --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
             --port 8000 \
+            --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
             --api-server-count ${VLLM_API_SERVER_COUNT:-8} \
-            {{- if .Spec.Prefill.Parallelism.Expert -}}--enable-expert-parallel{{- end }} \
-            {{- if .Spec.Prefill.Parallelism.Tensor -}}--tensor-parallel-size {{ .Spec.Prefill.Parallelism.Tensor }}{{- end }} \
-            --data-parallel-size {{ or .Spec.Prefill.Parallelism.Data 1 }} \
-            --data-parallel-size-local {{ or .Spec.Prefill.Parallelism.DataLocal 1 }} \
+            {{- if and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.Expert -}}--enable-expert-parallel{{- end }} \
+            {{- if and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.Tensor -}}--tensor-parallel-size {{ .Spec.Prefill.Parallelism.Tensor }}{{- end }} \
+            --data-parallel-size {{ or (and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.Data) 1 }} \
+            --data-parallel-size-local {{ or (and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.DataLocal) 1 }} \
             --data-parallel-address ${DP_ADDRESS} \
-            --data-parallel-rpc-port {{ if .Spec.Prefill.Parallelism.DataRPCPort }}{{ .Spec.Prefill.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
+            --data-parallel-rpc-port {{ if and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.DataRPCPort }}{{ .Spec.Prefill.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
             --data-parallel-start-rank $START_RANK \
             ${ACCESS_LOG_ARGS} \
             ${SHUTDOWN_TIMEOUT_ARGS} \
@@ -4200,6 +4402,43 @@ spec:
         - /bin/bash
         - -c
         - |-
+          # Spyre architecture-specific setup for ppc64le/s390x
+          if [ -d /opt/ibm/spyre ]; then
+            ARCH="$(arch)"
+            case "${ARCH}" in
+              ppc64le)
+                if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                  . /opt/rh/gcc-toolset-14/enable
+                  export PATH
+                fi
+                ;;
+              s390x)
+                export FLEX_DEVICE=VF
+                if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                  source /etc/profile.d/ibm-aiu-setup.sh
+                fi
+                export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+                if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                  if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                    export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                  else
+                    echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                    rm -f "$HOME/.senlib.json"
+                  fi
+                else
+                  echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+                fi
+                if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                  . /opt/rh/gcc-toolset-14/enable
+                  export PATH
+                fi
+                ;;
+              x86_64)
+                export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+                ;;
+            esac
+          fi
+
           if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
             source /etc/profile.d/ibm-aiu-setup.sh
           fi
@@ -4346,7 +4585,7 @@ spec:
             fi
           fi
 
-          START_RANK=$(( ${LWS_WORKER_INDEX:-0} * {{ or .Spec.Prefill.Parallelism.DataLocal 1 }} ))
+          START_RANK=$(( ${LWS_WORKER_INDEX:-0} * {{ or (and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.DataLocal) 1 }} ))
 
           # --disable-access-log-for-endpoints landed in vLLM 0.16.0 (vllm-project/vllm#30011).
           # Older versions still need the blanket --disable-uvicorn-access-log.
@@ -4390,12 +4629,13 @@ spec:
             /mnt/models \
             --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
             --port 8000 \
-            {{- if .Spec.Prefill.Parallelism.Expert }}--enable-expert-parallel{{- end }} \
-            {{- if .Spec.Prefill.Parallelism.Tensor }}--tensor-parallel-size {{ .Spec.Prefill.Parallelism.Tensor }}{{- end }} \
-            --data-parallel-size {{ or .Spec.Prefill.Parallelism.Data 1 }} \
-            --data-parallel-size-local {{ or .Spec.Prefill.Parallelism.DataLocal 1 }} \
+            --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
+            {{- if and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.Expert }}--enable-expert-parallel{{- end }} \
+            {{- if and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.Tensor }}--tensor-parallel-size {{ .Spec.Prefill.Parallelism.Tensor }}{{- end }} \
+            --data-parallel-size {{ or (and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.Data) 1 }} \
+            --data-parallel-size-local {{ or (and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.DataLocal) 1 }} \
             --data-parallel-address ${DP_ADDRESS} \
-            --data-parallel-rpc-port {{ if .Spec.Prefill.Parallelism.DataRPCPort }}{{ .Spec.Prefill.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
+            --data-parallel-rpc-port {{ if and .Spec.Prefill .Spec.Prefill.Parallelism .Spec.Prefill.Parallelism.DataRPCPort }}{{ .Spec.Prefill.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
             --data-parallel-start-rank $START_RANK \
             --headless \
             ${ACCESS_LOG_ARGS} \
@@ -4906,6 +5146,68 @@ spec:
 apiVersion: serving.kserve.io/v1alpha2
 kind: LLMInferenceServiceConfig
 metadata:
+  name: kserve-config-llm-scheduler-eppconfig-default
+  namespace: kserve
+spec:
+  router:
+    scheduler:
+      config:
+        inline:
+          apiVersion: llm-d.ai/v1alpha1
+          kind: EndpointPickerConfig
+          plugins:
+          - type: approx-prefix-cache-producer
+          - type: inflight-load-producer
+          - type: prefix-cache-affinity-filter
+          - type: token-load-scorer
+          schedulingProfiles:
+          - name: default
+            plugins:
+            - pluginRef: prefix-cache-affinity-filter
+            - pluginRef: token-load-scorer
+---
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceServiceConfig
+metadata:
+  name: kserve-config-llm-scheduler-eppconfig-default-pd
+  namespace: kserve
+spec:
+  router:
+    scheduler:
+      config:
+        inline:
+          apiVersion: llm-d.ai/v1alpha1
+          kind: EndpointPickerConfig
+          plugins:
+          - type: always-disagg-pd-decider
+          - parameters:
+              deciders:
+                prefill: always-disagg-pd-decider
+            type: disagg-profile-handler
+          - type: prefill-filter
+          - type: decode-filter
+          - type: approx-prefix-cache-producer
+          - type: inflight-load-producer
+          - type: prefix-cache-affinity-filter
+          - type: token-load-scorer
+          - type: active-request-scorer
+          - type: max-score-picker
+          schedulingProfiles:
+          - name: prefill
+            plugins:
+            - pluginRef: prefill-filter
+            - pluginRef: prefix-cache-affinity-filter
+            - pluginRef: token-load-scorer
+            - pluginRef: max-score-picker
+          - name: decode
+            plugins:
+            - pluginRef: decode-filter
+            - pluginRef: active-request-scorer
+            - pluginRef: max-score-picker
+---
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceServiceConfig
+metadata:
   name: kserve-config-llm-scheduler-latency-predictor
   namespace: kserve
 spec:
@@ -5103,6 +5405,43 @@ spec:
       - /bin/bash
       - -c
       - |-
+        # Spyre architecture-specific setup for ppc64le/s390x
+        if [ -d /opt/ibm/spyre ]; then
+          ARCH="$(arch)"
+          case "${ARCH}" in
+            ppc64le)
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            s390x)
+              export FLEX_DEVICE=VF
+              if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                source /etc/profile.d/ibm-aiu-setup.sh
+              fi
+              export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+              if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                  export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                else
+                  echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                  rm -f "$HOME/.senlib.json"
+                fi
+              else
+                echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+              fi
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            x86_64)
+              export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+              ;;
+          esac
+        fi
+
         if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
           source /etc/profile.d/ibm-aiu-setup.sh
         fi
@@ -5256,6 +5595,7 @@ spec:
         eval "exec vllm serve /mnt/models \
           --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
           --port 8000 \
+          --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
           ${ACCESS_LOG_ARGS} \
           ${SHUTDOWN_TIMEOUT_ARGS} \
           ${KV_TRANSFER_ARGS} \
@@ -5451,6 +5791,43 @@ spec:
       - /bin/bash
       - -c
       - |-
+        # Spyre architecture-specific setup for ppc64le/s390x
+        if [ -d /opt/ibm/spyre ]; then
+          ARCH="$(arch)"
+          case "${ARCH}" in
+            ppc64le)
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            s390x)
+              export FLEX_DEVICE=VF
+              if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                source /etc/profile.d/ibm-aiu-setup.sh
+              fi
+              export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+              if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                  export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                else
+                  echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                  rm -f "$HOME/.senlib.json"
+                fi
+              else
+                echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+              fi
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            x86_64)
+              export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+              ;;
+          esac
+        fi
+
         if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
           source /etc/profile.d/ibm-aiu-setup.sh
         fi
@@ -5627,13 +6004,14 @@ spec:
           /mnt/models \
           --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
           --port 8000 \
+          --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
           --api-server-count ${VLLM_API_SERVER_COUNT:-8} \
-          {{- if .Spec.Parallelism.Expert -}}--enable-expert-parallel{{- end }} \
-          {{- if .Spec.Parallelism.Tensor -}}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
-          --data-parallel-size {{ or .Spec.Parallelism.Data 1 }} \
-          --data-parallel-size-local {{ or .Spec.Parallelism.DataLocal 1 }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Expert -}}--enable-expert-parallel{{- end }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Tensor -}}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
+          --data-parallel-size {{ or (and .Spec.Parallelism .Spec.Parallelism.Data) 1 }} \
+          --data-parallel-size-local {{ or (and .Spec.Parallelism .Spec.Parallelism.DataLocal) 1 }} \
           --data-parallel-address ${DP_ADDRESS} \
-          --data-parallel-rpc-port {{ if .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
+          --data-parallel-rpc-port {{ if and .Spec.Parallelism .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
           --data-parallel-start-rank $START_RANK \
           ${ACCESS_LOG_ARGS} \
           ${SHUTDOWN_TIMEOUT_ARGS} \
@@ -5734,6 +6112,43 @@ spec:
       - /bin/bash
       - -c
       - |-
+        # Spyre architecture-specific setup for ppc64le/s390x
+        if [ -d /opt/ibm/spyre ]; then
+          ARCH="$(arch)"
+          case "${ARCH}" in
+            ppc64le)
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            s390x)
+              export FLEX_DEVICE=VF
+              if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
+                source /etc/profile.d/ibm-aiu-setup.sh
+              fi
+              export TORCH_SENDNN_TEMP_CACHE_DIR=/opt/ibm/spyre/models/cache/
+              if [ -n "${AIU_AUTOGEN_SENLIB_CONFIG_FILE:-}" ] && [ -r "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" ]; then
+                if jq -e '(.SNT_MCI.DCR.MCI_CTRL.ENABLE_RISCV = "0x0") | del(.SNT_MCI.init) | (.METRICS.general.enable = true)' "${AIU_AUTOGEN_SENLIB_CONFIG_FILE}" > "$HOME/.senlib.json" && [ -s "$HOME/.senlib.json" ]; then
+                  export SENLIB_DEVEL_CONFIG_FILE="$HOME/.senlib.json"
+                else
+                  echo "WARNING: jq failed to process ${AIU_AUTOGEN_SENLIB_CONFIG_FILE}, skipping SENLIB config generation"
+                  rm -f "$HOME/.senlib.json"
+                fi
+              else
+                echo "WARNING: AIU_AUTOGEN_SENLIB_CONFIG_FILE is not set or not readable, skipping SENLIB config generation"
+              fi
+              if [ -f /opt/rh/gcc-toolset-14/enable ]; then
+                . /opt/rh/gcc-toolset-14/enable
+                export PATH
+              fi
+              ;;
+            x86_64)
+              export SENDNN_INFERENCE_REQUIRE_PRECOMPILED_DECODERS=0
+              ;;
+          esac
+        fi
+
         if [ -f /etc/profile.d/ibm-aiu-setup.sh ]; then
           source /etc/profile.d/ibm-aiu-setup.sh
         fi
@@ -5880,7 +6295,7 @@ spec:
           fi
         fi
 
-        START_RANK=$(( ${LWS_WORKER_INDEX:-0} * {{ or .Spec.Parallelism.DataLocal 1 }} ))
+        START_RANK=$(( ${LWS_WORKER_INDEX:-0} * {{ or (and .Spec.Parallelism .Spec.Parallelism.DataLocal) 1 }} ))
 
         # --disable-access-log-for-endpoints landed in vLLM 0.16.0 (vllm-project/vllm#30011).
         # Older versions still need the blanket --disable-uvicorn-access-log.
@@ -5910,12 +6325,13 @@ spec:
           /mnt/models \
           --served-model-name "{{ .Spec.Model.Name }}" "publishers/{{ .ObjectMeta.Namespace }}/models/{{ .Spec.Model.Name }}" \
           --port 8000 \
-          {{- if .Spec.Parallelism.Expert }}--enable-expert-parallel{{- end }} \
-          {{- if .Spec.Parallelism.Tensor }}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
-          --data-parallel-size {{ or .Spec.Parallelism.Data 1 }} \
-          --data-parallel-size-local {{ or .Spec.Parallelism.DataLocal 1 }} \
+          --root-path /{{ .ObjectMeta.Namespace }}/{{ .ObjectMeta.Name }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Expert }}--enable-expert-parallel{{- end }} \
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Tensor }}--tensor-parallel-size {{ .Spec.Parallelism.Tensor }}{{- end }} \
+          --data-parallel-size {{ or (and .Spec.Parallelism .Spec.Parallelism.Data) 1 }} \
+          --data-parallel-size-local {{ or (and .Spec.Parallelism .Spec.Parallelism.DataLocal) 1 }} \
           --data-parallel-address ${DP_ADDRESS} \
-          --data-parallel-rpc-port {{ if .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
+          --data-parallel-rpc-port {{ if and .Spec.Parallelism .Spec.Parallelism.DataRPCPort }}{{ .Spec.Parallelism.DataRPCPort }}{{ else }}5555{{- end }} \
           --data-parallel-start-rank $START_RANK \
           --headless \
           ${ACCESS_LOG_ARGS} \
@@ -5988,6 +6404,95 @@ spec:
     - name: tls-certs
       secret:
         secretName: '{{ ChildName .ObjectMeta.Name `-kserve-self-signed-certs` }}'
+---
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceServiceConfig
+metadata:
+  name: kserve-config-sglang-template
+  namespace: kserve
+spec:
+  template:
+    containers:
+    - command:
+      - /bin/bash
+      - -c
+      - |-
+        args=(
+          python3 -m sglang.launch_server
+          --model-path /mnt/models
+          --served-model-name "{{ .Spec.Model.Name }}"
+          --port 8000
+          --host 0.0.0.0
+          {{- if and .Spec.Parallelism .Spec.Parallelism.Tensor }} --tp {{ .Spec.Parallelism.Tensor }}{{- end }}
+          {{- if .Spec.TrustRemoteCode }} --trust-remote-code{{- end }}
+        )
+        exec "${args[@]}" "$@"
+      - --
+      env:
+      - name: HOME
+        value: /home
+      - name: HF_HUB_CACHE
+        value: /models
+      imagePullPolicy: IfNotPresent
+      livenessProbe:
+        failureThreshold: 3
+        httpGet:
+          path: /health
+          port: 8000
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 10
+      name: main
+      ports:
+      - containerPort: 8000
+        protocol: TCP
+      readinessProbe:
+        failureThreshold: 60
+        httpGet:
+          path: /health
+          port: 8000
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        seccompProfile:
+          type: RuntimeDefault
+      startupProbe:
+        failureThreshold: 60
+        httpGet:
+          path: /health
+          port: 8000
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 10
+      terminationMessagePath: /dev/termination-log
+      terminationMessagePolicy: FallbackToLogsOnError
+      volumeMounts:
+      - mountPath: /home
+        name: home
+      - mountPath: /tmp
+        name: tmp-dir
+      - mountPath: /dev/shm
+        name: dshm
+      - mountPath: /models
+        name: model-cache
+    terminationGracePeriodSeconds: 30
+    volumes:
+    - emptyDir: {}
+      name: home
+    - emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+      name: dshm
+    - emptyDir: {}
+      name: model-cache
+    - emptyDir: {}
+      name: tmp-dir
 KSERVE_LLMISVCCONFIG_MANIFEST_EOF
 }
 
@@ -6005,7 +6510,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: clusterservingruntimes.serving.kserve.io
 spec:
   group: serving.kserve.io
@@ -8000,6 +8505,10 @@ spec:
                                     type: integer
                                   signerName:
                                     type: string
+                                  userAnnotations:
+                                    additionalProperties:
+                                      type: string
+                                    type: object
                                 required:
                                 - keyType
                                 - signerName
@@ -10024,6 +10533,10 @@ spec:
                                         type: integer
                                       signerName:
                                         type: string
+                                      userAnnotations:
+                                        additionalProperties:
+                                          type: string
+                                        type: object
                                     required:
                                     - keyType
                                     - signerName
@@ -10232,7 +10745,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: clusterstoragecontainers.serving.kserve.io
 spec:
   group: serving.kserve.io
@@ -11004,7 +11517,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: inferencegraphs.serving.kserve.io
 spec:
   group: serving.kserve.io
@@ -11658,7 +12171,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: kserve/serving-cert
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: inferenceservices.serving.kserve.io
 spec:
   group: serving.kserve.io
@@ -23105,6 +23618,10 @@ spec:
                                               type: integer
                                             signerName:
                                               type: string
+                                            userAnnotations:
+                                              additionalProperties:
+                                                type: string
+                                              type: object
                                           required:
                                           - keyType
                                           - signerName
@@ -26856,6 +27373,10 @@ spec:
                                                   type: integer
                                                 signerName:
                                                   type: string
+                                                userAnnotations:
+                                                  additionalProperties:
+                                                    type: string
+                                                  type: object
                                               required:
                                               - keyType
                                               - signerName
@@ -27047,6 +27568,30 @@ spec:
                                 - name
                                 type: object
                               type: array
+                            workloadRef:
+                              properties:
+                                name:
+                                  type: string
+                                podGroup:
+                                  type: string
+                                podGroupReplicaKey:
+                                  type: string
+                              required:
+                              - name
+                              - podGroup
+                              type: object
+                          type: object
+                        workloadRef:
+                          properties:
+                            name:
+                              type: string
+                            podGroup:
+                              type: string
+                            podGroupReplicaKey:
+                              type: string
+                          required:
+                          - name
+                          - podGroup
                           type: object
                         xgboost:
                           properties:
@@ -31711,6 +32256,10 @@ spec:
                                         type: integer
                                       signerName:
                                         type: string
+                                      userAnnotations:
+                                        additionalProperties:
+                                          type: string
+                                        type: object
                                     required:
                                     - keyType
                                     - signerName
@@ -31902,6 +32451,15 @@ spec:
                       - name
                       type: object
                     type: array
+                  workloadRef:
+                    properties:
+                      name:
+                        type: string
+                      podGroup:
+                        type: string
+                      podGroupReplicaKey:
+                        type: string
+                    type: object
                 type: object
               predictor:
                 properties:
@@ -42469,6 +43027,10 @@ spec:
                                         type: integer
                                       signerName:
                                         type: string
+                                      userAnnotations:
+                                        additionalProperties:
+                                          type: string
+                                        type: object
                                     required:
                                     - keyType
                                     - signerName
@@ -46220,6 +46782,10 @@ spec:
                                             type: integer
                                           signerName:
                                             type: string
+                                          userAnnotations:
+                                            additionalProperties:
+                                              type: string
+                                            type: object
                                         required:
                                         - keyType
                                         - signerName
@@ -46411,6 +46977,27 @@ spec:
                           - name
                           type: object
                         type: array
+                      workloadRef:
+                        properties:
+                          name:
+                            type: string
+                          podGroup:
+                            type: string
+                          podGroupReplicaKey:
+                            type: string
+                        required:
+                        - name
+                        - podGroup
+                        type: object
+                    type: object
+                  workloadRef:
+                    properties:
+                      name:
+                        type: string
+                      podGroup:
+                        type: string
+                      podGroupReplicaKey:
+                        type: string
                     type: object
                   xgboost:
                     properties:
@@ -47150,6 +47737,17 @@ spec:
                       workingDir:
                         type: string
                     type: object
+                type: object
+              tracing:
+                properties:
+                  exporter:
+                    type: string
+                  exporterEndpoint:
+                    type: string
+                  sampler:
+                    type: string
+                  samplerArg:
+                    type: string
                 type: object
               transformer:
                 properties:
@@ -50321,6 +50919,10 @@ spec:
                                         type: integer
                                       signerName:
                                         type: string
+                                      userAnnotations:
+                                        additionalProperties:
+                                          type: string
+                                        type: object
                                     required:
                                     - keyType
                                     - signerName
@@ -50512,6 +51114,15 @@ spec:
                       - name
                       type: object
                     type: array
+                  workloadRef:
+                    properties:
+                      name:
+                        type: string
+                      podGroup:
+                        type: string
+                      podGroupReplicaKey:
+                        type: string
+                    type: object
                 type: object
             required:
             - predictor
@@ -50787,7 +51398,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: servingruntimes.serving.kserve.io
 spec:
   group: serving.kserve.io
@@ -52782,6 +53393,10 @@ spec:
                                     type: integer
                                   signerName:
                                     type: string
+                                  userAnnotations:
+                                    additionalProperties:
+                                      type: string
+                                    type: object
                                 required:
                                 - keyType
                                 - signerName
@@ -54806,6 +55421,10 @@ spec:
                                         type: integer
                                       signerName:
                                         type: string
+                                      userAnnotations:
+                                        additionalProperties:
+                                          type: string
+                                        type: object
                                     required:
                                     - keyType
                                     - signerName
@@ -55014,7 +55633,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: trainedmodels.serving.kserve.io
 spec:
   group: serving.kserve.io
