@@ -38,7 +38,8 @@ PyJWT = {version = ">=2.13.0"}
 # CVE-2026-30922 / CVE-2026-23490 / CVE-2026-59885 pyasn1 Vulnerable to Denial of Service
 # Pinning because it is a transitive dependency.
 pyasn1 = {version = ">=0.6.4"}
-
+# CVE-2026-69244 AIOHTTP Denial of Service via malformed HTTP responses (out-of-bounds heap read)
+aiohttp = {version = ">=3.14.3"}
 
 #[tool.poetry-version-plugin]
 #source = "file"
