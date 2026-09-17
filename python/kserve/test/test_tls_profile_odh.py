@@ -117,6 +117,7 @@ def test_refresher_reads_and_watches_profile(monkeypatch):
         version="v1",
         plural="apiservers",
         name="cluster",
+        _request_timeout=(5, 10),
     )
     profile_watch.stream.assert_called_once_with(
         api.list_cluster_custom_object,
@@ -124,7 +125,8 @@ def test_refresher_reads_and_watches_profile(monkeypatch):
         version="v1",
         plural="apiservers",
         field_selector="metadata.name=cluster",
-        timeout_seconds=300,
+        timeout_seconds=30,
+        _request_timeout=(5, 10),
     )
 
 

@@ -50,6 +50,9 @@ class TLSProfileRefresher:
 
     _INITIAL_RETRY_DELAY_SECONDS = 1.0
     _MAX_RETRY_DELAY_SECONDS = 30.0
+    _API_REQUEST_TIMEOUT_SECONDS = (5, 10)
+    _WATCH_TIMEOUT_SECONDS = 30
+    _THREAD_JOIN_TIMEOUT_SECONDS = 11
 
     def __init__(
         self,
@@ -61,6 +64,7 @@ class TLSProfileRefresher:
         self._api_factory = api_factory
         self._watch_factory = watch_factory
         self._watch: Optional[watch.Watch] = None
+        self._watch_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._stopped = threading.Event()
         self._default_ciphers = tuple(
@@ -76,6 +80,7 @@ class TLSProfileRefresher:
                 version="v1",
                 plural="apiservers",
                 name="cluster",
+                _request_timeout=self._API_REQUEST_TIMEOUT_SECONDS,
             )
             self._apply(apiserver)
         except Exception:
@@ -113,17 +118,24 @@ class TLSProfileRefresher:
                         version="v1",
                         plural="apiservers",
                         name="cluster",
+                        _request_timeout=self._API_REQUEST_TIMEOUT_SECONDS,
                     )
                     self._apply(apiserver)
 
-                self._watch = self._watch_factory()
-                for event in self._watch.stream(
+                profile_watch = self._watch_factory()
+                with self._watch_lock:
+                    if self._stopped.is_set():
+                        profile_watch.stop()
+                        return
+                    self._watch = profile_watch
+                for event in profile_watch.stream(
                     api.list_cluster_custom_object,
                     group="config.openshift.io",
                     version="v1",
                     plural="apiservers",
                     field_selector="metadata.name=cluster",
-                    timeout_seconds=300,
+                    timeout_seconds=self._WATCH_TIMEOUT_SECONDS,
+                    _request_timeout=self._API_REQUEST_TIMEOUT_SECONDS,
                 ):
                     if self._stopped.is_set():
                         return
@@ -145,8 +157,10 @@ class TLSProfileRefresher:
 
     def stop(self) -> None:
         self._stopped.set()
-        if self._watch is not None:
-            self._watch.stop()
+        with self._watch_lock:
+            profile_watch = self._watch
+        if profile_watch is not None:
+            profile_watch.stop()
         if self._thread is not None:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=self._THREAD_JOIN_TIMEOUT_SECONDS)
             self._thread = None

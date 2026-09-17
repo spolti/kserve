@@ -56,16 +56,16 @@ class SSLCertRefresher:
             try:
                 async for changes in awatch(*paths):
                     retry_delay = self._INITIAL_RETRY_DELAY_SECONDS
-                    try:
-                        for change, file_path in changes:
+                    for change, file_path in changes:
+                        try:
                             logger.info(
                                 "SSL certificate file change detected: %s - %s",
                                 change.name,
                                 file_path,
                             )
                             callback(change, file_path)
-                    except Exception:
-                        logger.exception("Failed to reload SSL certificate chain")
+                        except Exception:
+                            logger.exception("Failed to reload SSL certificate chain")
                 return
             except asyncio.CancelledError:
                 raise

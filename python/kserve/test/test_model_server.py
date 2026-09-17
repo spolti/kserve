@@ -49,15 +49,15 @@ def test_model_server_no_ssl_keeps_default_port():
     assert server.http_port == 8080
 
 
-def test_model_server_partial_ssl_keeps_default_port():
-    server = ModelServer(
-        ssl_certfile="/etc/tls/private/tls.crt",
-    )
-    assert server.http_port == 8080
-
-
-def test_model_server_rejects_ssl_key_without_certificate():
+@pytest.mark.parametrize(
+    "ssl_certfile,ssl_keyfile",
+    [
+        ("/etc/tls/private/tls.crt", None),
+        (None, "/etc/tls/private/tls.key"),
+    ],
+)
+def test_model_server_rejects_partial_ssl_configuration(ssl_certfile, ssl_keyfile):
     with pytest.raises(
-        ValueError, match="ssl_certfile is required when ssl_keyfile is set"
+        ValueError, match="ssl_certfile and ssl_keyfile must be configured together"
     ):
-        ModelServer(ssl_keyfile="/etc/tls/private/tls.key")
+        ModelServer(ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile)

@@ -119,6 +119,8 @@ class RESTServer:
         ssl_certfile: Optional[str] = None,
         ssl_keyfile: Optional[str] = None,
     ):
+        if bool(ssl_certfile) != bool(ssl_keyfile):
+            raise ValueError("ssl_certfile and ssl_keyfile must be configured together")
         self.dataplane = data_plane
         self.model_repository_extension = model_repository_extension
         self.access_log_format = access_log_format

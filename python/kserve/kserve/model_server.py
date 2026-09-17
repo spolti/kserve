@@ -285,8 +285,8 @@ class ModelServer:
         )
         self.ssl_certfile = ssl_certfile
         self.ssl_keyfile = ssl_keyfile
-        if self.ssl_keyfile and not self.ssl_certfile:
-            raise ValueError("ssl_certfile is required when ssl_keyfile is set")
+        if bool(self.ssl_certfile) != bool(self.ssl_keyfile):
+            raise ValueError("ssl_certfile and ssl_keyfile must be configured together")
         # When SSL is enabled and the port was not explicitly overridden, switch to the HTTPS port.
         if self.ssl_certfile and self.ssl_keyfile and http_port == DEFAULT_HTTP_PORT:
             http_port = DEFAULT_HTTPS_PORT

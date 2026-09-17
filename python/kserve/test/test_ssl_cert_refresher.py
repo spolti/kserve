@@ -49,8 +49,10 @@ async def test_ssl_cert_refresher_keeps_watching_after_reload_error(monkeypatch)
     key_path = "/etc/tls/tls.key"
 
     async def changes(*_paths):
-        yield {(Change.modified, cert_path)}
-        yield {(Change.modified, key_path)}
+        yield {
+            (Change.modified, cert_path),
+            (Change.modified, key_path),
+        }
 
     monkeypatch.setattr(ssl_cert_refresher, "awatch", changes)
     exception_logger = Mock()
