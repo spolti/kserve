@@ -52,7 +52,8 @@ class TLSProfileRefresher:
     _MAX_RETRY_DELAY_SECONDS = 30.0
     _API_REQUEST_TIMEOUT_SECONDS = (5, 10)
     _WATCH_TIMEOUT_SECONDS = 30
-    _THREAD_JOIN_TIMEOUT_SECONDS = 11
+    _WATCH_REQUEST_TIMEOUT_SECONDS = (5, 35)
+    _THREAD_JOIN_TIMEOUT_SECONDS = 36
 
     def __init__(
         self,
@@ -135,7 +136,7 @@ class TLSProfileRefresher:
                     plural="apiservers",
                     field_selector="metadata.name=cluster",
                     timeout_seconds=self._WATCH_TIMEOUT_SECONDS,
-                    _request_timeout=self._API_REQUEST_TIMEOUT_SECONDS,
+                    _request_timeout=self._WATCH_REQUEST_TIMEOUT_SECONDS,
                 ):
                     if self._stopped.is_set():
                         return

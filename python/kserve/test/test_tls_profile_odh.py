@@ -126,7 +126,7 @@ def test_refresher_reads_and_watches_profile(monkeypatch):
         plural="apiservers",
         field_selector="metadata.name=cluster",
         timeout_seconds=30,
-        _request_timeout=(5, 10),
+        _request_timeout=(5, 35),
     )
 
 
