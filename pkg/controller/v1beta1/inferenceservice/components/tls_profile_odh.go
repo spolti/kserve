@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,7 +41,7 @@ func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec
 	apiServer := &configv1.APIServer{}
 	if err := reader.Get(ctx, client.ObjectKey{Name: apiServerName}, apiServer); err == nil {
 		profileSpec = effectiveTLSProfileSpec(apiServer)
-	} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) &&
+	} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) && !runtime.IsNotRegisteredError(err) &&
 		!apierrors.IsForbidden(err) && !apierrors.IsUnauthorized(err) {
 		return err
 	}
