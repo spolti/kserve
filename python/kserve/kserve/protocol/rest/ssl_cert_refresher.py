@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import asyncio
+import os
+import ssl
 from collections.abc import Callable
 from ssl import SSLContext
 from typing import Optional
@@ -43,6 +45,8 @@ class SSLCertRefresher:
 
     def _reload_cert_chain(self, _change: Change, _file_path: str) -> None:
         logger.info("Reloading SSL certificate chain")
+        probe = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        probe.load_cert_chain(self.cert_path, self.key_path)
         self.ssl_context.load_cert_chain(self.cert_path, self.key_path)
 
     async def _watch_files(
@@ -51,10 +55,17 @@ class SSLCertRefresher:
         callback: Callable[[Change, str], None],
     ) -> None:
         logger.info("Monitoring SSL certificate files: %s", paths)
+        directories = {os.path.dirname(os.path.abspath(path)) for path in paths}
+        watched_names = {"..data", *(os.path.basename(path) for path in paths)}
         retry_delay = self._INITIAL_RETRY_DELAY_SECONDS
         while True:
             try:
-                async for changes in awatch(*paths):
+                async for changes in awatch(
+                    *directories,
+                    recursive=False,
+                    watch_filter=lambda _change, path: os.path.basename(path)
+                    in watched_names,
+                ):
                     retry_delay = self._INITIAL_RETRY_DELAY_SECONDS
                     for change, file_path in changes:
                         try:

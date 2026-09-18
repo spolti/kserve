@@ -53,6 +53,8 @@ def apply_profile(
         spec.get("minTLSVersion"), ssl.TLSVersion.TLSv1_2
     )
     ciphers = spec.get("ciphers", [])
+    # OpenShift profile cipher lists govern TLS 1.2 and earlier. Python/OpenSSL
+    # manages TLS 1.3 suites separately, so do not cap the maximum TLS version.
     if ciphers and ssl_context.minimum_version < ssl.TLSVersion.TLSv1_3:
         ssl_context.set_ciphers(":".join(ciphers))
     elif not ciphers and default_ciphers is not None:
