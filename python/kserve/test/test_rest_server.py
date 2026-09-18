@@ -108,9 +108,8 @@ async def test_ssl_cert_refresher_lifecycle(monkeypatch):
     refresher = Mock()
     refresher_class = Mock(return_value=refresher)
     monkeypatch.setattr(rest_mod, "SSLCertRefresher", refresher_class)
-    profile_refresher = Mock()
-    profile_refresher_class = Mock(return_value=profile_refresher)
-    monkeypatch.setattr(rest_mod, "TLSProfileRefresher", profile_refresher_class)
+    apply_profile = Mock()
+    monkeypatch.setattr(rest_mod, "apply_profile_from_environment", apply_profile)
     ssl_context = Mock()
 
     rs = rest_mod.RESTServer(
@@ -136,6 +135,4 @@ async def test_ssl_cert_refresher_lifecycle(monkeypatch):
         cert_path="/etc/tls/tls.crt",
     )
     refresher.stop.assert_called_once_with()
-    profile_refresher_class.assert_called_once_with(ssl_context)
-    profile_refresher.start.assert_called_once_with()
-    profile_refresher.stop.assert_called_once_with()
+    apply_profile.assert_called_once_with(ssl_context)

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import ssl
+import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -39,6 +40,9 @@ VERSION_MAP: dict[str, ssl.TLSVersion] = {
     "VersionTLS13": ssl.TLSVersion.TLSv1_3,
 }
 
+TLS_MIN_VERSION_ENV = "KSERVE_TLS_MIN_VERSION"
+TLS_CIPHERS_ENV = "KSERVE_TLS_CIPHERS"
+
 
 def apply_profile(
     ssl_context: ssl.SSLContext,
@@ -53,3 +57,16 @@ def apply_profile(
         ssl_context.set_ciphers(":".join(ciphers))
     elif not ciphers and default_ciphers is not None:
         ssl_context.set_ciphers(":".join(default_ciphers))
+
+
+def apply_profile_from_environment(ssl_context: ssl.SSLContext) -> bool:
+    """Apply an injected TLS profile, returning whether one was present."""
+    min_version = os.getenv(TLS_MIN_VERSION_ENV)
+    if not min_version:
+        return False
+    ciphers = [cipher for cipher in os.getenv(TLS_CIPHERS_ENV, "").split(":") if cipher]
+    apply_profile(
+        ssl_context,
+        {"minTLSVersion": min_version, "ciphers": ciphers},
+    )
+    return True

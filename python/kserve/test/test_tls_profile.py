@@ -18,6 +18,7 @@ from kserve.protocol.rest.tls_profile import (
     BUILTIN_PROFILES,
     INTERMEDIATE_PROFILE,
     apply_profile,
+    apply_profile_from_environment,
 )
 
 
@@ -39,3 +40,28 @@ def test_apply_profile_restores_default_ciphers_for_empty_profile():
     apply_profile(context, BUILTIN_PROFILES["Old"], default_ciphers)
 
     assert {cipher["name"] for cipher in context.get_ciphers()} == set(default_ciphers)
+
+
+def test_apply_profile_from_injected_environment(monkeypatch):
+    monkeypatch.setenv("KSERVE_TLS_MIN_VERSION", "VersionTLS12")
+    monkeypatch.setenv(
+        "KSERVE_TLS_CIPHERS",
+        "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384",
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+
+    assert apply_profile_from_environment(context)
+
+    enabled = {cipher["name"] for cipher in context.get_ciphers()}
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
+    assert "ECDHE-RSA-AES128-GCM-SHA256" in enabled
+    assert "ECDHE-RSA-AES256-GCM-SHA384" in enabled
+
+
+def test_apply_profile_from_environment_is_noop_without_injection(monkeypatch):
+    monkeypatch.delenv("KSERVE_TLS_MIN_VERSION", raising=False)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    original_minimum = context.minimum_version
+
+    assert not apply_profile_from_environment(context)
+    assert context.minimum_version == original_minimum

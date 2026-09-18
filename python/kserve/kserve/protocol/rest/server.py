@@ -53,7 +53,7 @@ from kserve.protocol.tracing import get_tracer_provider
 from ..model_repository_extension import ModelRepositoryExtension
 from .middleware import TraceResponseHeaderMiddleware
 from .ssl_cert_refresher import SSLCertRefresher
-from .tls_profile_odh import TLSProfileRefresher
+from .tls_profile import apply_profile_from_environment
 from .v1_endpoints import register_v1_endpoints
 from .v2_endpoints import register_v2_endpoints
 
@@ -83,7 +83,6 @@ class _RefreshingServer(uvicorn.Server):
     def __init__(self, config: uvicorn.Config):
         super().__init__(config)
         self._ssl_cert_refresher: Optional[SSLCertRefresher] = None
-        self._tls_profile_refresher: Optional[TLSProfileRefresher] = None
 
     async def serve(self, sockets: Optional[List[socket]] = None) -> None:
         if not self.config.loaded:
@@ -99,8 +98,7 @@ class _RefreshingServer(uvicorn.Server):
                 key_path=str(self.config.ssl_keyfile),
                 cert_path=str(self.config.ssl_certfile),
             )
-            self._tls_profile_refresher = TLSProfileRefresher(self.config.ssl)
-            self._tls_profile_refresher.start()
+            apply_profile_from_environment(self.config.ssl)
 
         try:
             await super().serve(sockets=sockets)
@@ -108,9 +106,6 @@ class _RefreshingServer(uvicorn.Server):
             if self._ssl_cert_refresher is not None:
                 self._ssl_cert_refresher.stop()
                 self._ssl_cert_refresher = None
-            if self._tls_profile_refresher is not None:
-                self._tls_profile_refresher.stop()
-                self._tls_profile_refresher = None
 
 
 class RESTServer:
