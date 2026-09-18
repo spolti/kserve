@@ -37,14 +37,17 @@ const (
 )
 
 func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec *corev1.PodSpec) error {
-	profileSpec := configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
 	apiServer := &configv1.APIServer{}
-	if err := reader.Get(ctx, client.ObjectKey{Name: apiServerName}, apiServer); err == nil {
-		profileSpec = effectiveTLSProfileSpec(apiServer)
-	} else if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) && !runtime.IsNotRegisteredError(err) &&
-		!apierrors.IsForbidden(err) && !apierrors.IsUnauthorized(err) {
+	if err := reader.Get(ctx, client.ObjectKey{Name: apiServerName}, apiServer); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) ||
+			apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+			// The OpenShift profile API is unavailable on generic Kubernetes clusters and
+			// to controllers without profile RBAC. Leave those workloads unchanged.
+			return nil
+		}
 		return err
 	}
+	profileSpec := effectiveTLSProfileSpec(apiServer)
 
 	for i := range podSpec.Containers {
 		setContainerEnv(&podSpec.Containers[i], tlsMinVersionEnv, string(profileSpec.MinTLSVersion))
