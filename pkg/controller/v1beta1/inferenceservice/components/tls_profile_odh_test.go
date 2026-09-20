@@ -20,6 +20,7 @@ package components
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -58,7 +59,7 @@ func TestInjectTLSSecurityProfile(t *testing.T) {
 	}
 }
 
-func TestInjectTLSSecurityProfileSkipsUnavailableAPI(t *testing.T) {
+func TestInjectTLSSecurityProfileUsesIntermediateWhenAPIUnavailable(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := configv1.Install(scheme); err != nil {
 		t.Fatal(err)
@@ -69,9 +70,9 @@ func TestInjectTLSSecurityProfileSkipsUnavailableAPI(t *testing.T) {
 	if err := injectTLSSecurityProfile(context.Background(), reader, podSpec); err != nil {
 		t.Fatal(err)
 	}
-	if len(podSpec.Containers[0].Env) != 0 {
-		t.Fatalf("expected workload environment to remain unchanged, got %#v", podSpec.Containers[0].Env)
-	}
+	intermediate := configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
+	assertEnv(t, podSpec.Containers[0], tlsMinVersionEnv, string(intermediate.MinTLSVersion))
+	assertEnv(t, podSpec.Containers[0], tlsCiphersEnv, strings.Join(intermediate.Ciphers, ":"))
 }
 
 func assertEnv(t *testing.T, container corev1.Container, name, want string) {

@@ -44,6 +44,15 @@ def test_model_server_ssl_keeps_explicit_port():
     assert server.http_port == 9000
 
 
+def test_model_server_ssl_keeps_explicit_default_http_port():
+    server = ModelServer(
+        http_port=8080,
+        ssl_certfile="/etc/tls/private/tls.crt",
+        ssl_keyfile="/etc/tls/private/tls.key",
+    )
+    assert server.http_port == 8080
+
+
 def test_model_server_no_ssl_keeps_default_port():
     server = ModelServer()
     assert server.http_port == 8080

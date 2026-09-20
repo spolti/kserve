@@ -20,6 +20,7 @@ package components
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -38,16 +39,22 @@ const (
 
 func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec *corev1.PodSpec) error {
 	apiServer := &configv1.APIServer{}
+	var profileSpec *configv1.TLSProfileSpec
 	if err := reader.Get(ctx, client.ObjectKey{Name: apiServerName}, apiServer); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) ||
-			apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
-			// The OpenShift profile API is unavailable on generic Kubernetes clusters and
-			// to controllers without profile RBAC. Leave those workloads unchanged.
-			return nil
+			apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) ||
+			apierrors.IsServiceUnavailable(err) || apierrors.IsTimeout(err) ||
+			apierrors.IsServerTimeout(err) || apierrors.IsTooManyRequests(err) ||
+			errors.Is(err, context.DeadlineExceeded) {
+			// Use hardened defaults when the OpenShift profile API is unavailable. This
+			// also keeps distro builds secure when run on generic Kubernetes clusters.
+			profileSpec = configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
+		} else {
+			return err
 		}
-		return err
+	} else {
+		profileSpec = effectiveTLSProfileSpec(apiServer)
 	}
-	profileSpec := effectiveTLSProfileSpec(apiServer)
 
 	for i := range podSpec.Containers {
 		setContainerEnv(&podSpec.Containers[i], tlsMinVersionEnv, string(profileSpec.MinTLSVersion))
