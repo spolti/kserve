@@ -51,15 +51,21 @@ func TestInjectTLSSecurityProfile(t *testing.T) {
 	}
 	apiServer.Name = apiServerName
 	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(apiServer).Build()
-	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{Name: "predictor"}, {Name: "sidecar"}}}
+	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{
+		Name: "predictor",
+		Env: []corev1.EnvVar{
+			{Name: "KSERVE_TLS_CERT_FILE", Value: "/certs/tls.crt"},
+			{Name: "KSERVE_TLS_KEY_FILE", Value: "/certs/tls.key"},
+		},
+	}, {Name: "sidecar"}}}
 
 	if err := injectTLSSecurityProfile(context.Background(), reader, podSpec); err != nil {
 		t.Fatal(err)
 	}
-	for _, container := range podSpec.Containers {
-		assertEnv(t, container, tlsMinVersionEnv, "VersionTLS12")
-		assertEnv(t, container, tlsCiphersEnv, "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384")
-	}
+	assertEnv(t, podSpec.Containers[0], tlsMinVersionEnv, "VersionTLS12")
+	assertEnv(t, podSpec.Containers[0], tlsCiphersEnv, "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384")
+	assertNoEnv(t, podSpec.Containers[1], tlsMinVersionEnv)
+	assertNoEnv(t, podSpec.Containers[1], tlsCiphersEnv)
 }
 
 func TestInjectTLSSecurityProfileUsesIntermediateWhenAPIUnavailable(t *testing.T) {
@@ -68,7 +74,9 @@ func TestInjectTLSSecurityProfileUsesIntermediateWhenAPIUnavailable(t *testing.T
 		t.Fatal(err)
 	}
 	reader := fake.NewClientBuilder().WithScheme(scheme).Build()
-	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{Name: "predictor"}}}
+	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{Name: "predictor", Args: []string{
+		"--ssl_certfile=/certs/tls.crt", "--ssl_keyfile", "/certs/tls.key",
+	}}}}
 
 	if err := injectTLSSecurityProfile(context.Background(), reader, podSpec); err != nil {
 		t.Fatal(err)
@@ -93,6 +101,7 @@ func TestInjectTLSSecurityProfilePreservesWorkloadOnTransientError(t *testing.T)
 		Build()
 	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{
 		Name: "predictor",
+		Args: []string{"--ssl-certfile", "/certs/tls.crt", "--ssl-keyfile=/certs/tls.key"},
 		Env: []corev1.EnvVar{
 			{Name: tlsMinVersionEnv, Value: "VersionTLS13"},
 			{Name: tlsCiphersEnv, Value: ""},
@@ -106,6 +115,31 @@ func TestInjectTLSSecurityProfilePreservesWorkloadOnTransientError(t *testing.T)
 	assertEnv(t, podSpec.Containers[0], tlsCiphersEnv, "")
 }
 
+func TestInjectTLSSecurityProfileSkipsNonTLSContainers(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := configv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	reader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+				t.Fatal("APIServer profile should not be read for a non-TLS workload")
+				return nil
+			},
+		}).
+		Build()
+	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{Name: "predictor"}, {Name: "sidecar"}}}
+
+	if err := injectTLSSecurityProfile(context.Background(), reader, podSpec); err != nil {
+		t.Fatal(err)
+	}
+	for _, container := range podSpec.Containers {
+		assertNoEnv(t, container, tlsMinVersionEnv)
+		assertNoEnv(t, container, tlsCiphersEnv)
+	}
+}
+
 func assertEnv(t *testing.T, container corev1.Container, name, want string) {
 	t.Helper()
 	for _, env := range container.Env {
@@ -117,4 +151,13 @@ func assertEnv(t *testing.T, container corev1.Container, name, want string) {
 		}
 	}
 	t.Fatalf("environment variable %s not found", name)
+}
+
+func assertNoEnv(t *testing.T, container corev1.Container, name string) {
+	t.Helper()
+	for _, env := range container.Env {
+		if env.Name == name {
+			t.Fatalf("environment variable %s unexpectedly found", name)
+		}
+	}
 }

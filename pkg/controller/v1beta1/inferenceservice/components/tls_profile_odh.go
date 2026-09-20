@@ -28,6 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/kserve/kserve/pkg/constants"
 )
 
 const (
@@ -36,7 +38,20 @@ const (
 	apiServerName    = "cluster"
 )
 
-func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec *corev1.PodSpec) error {
+func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec *corev1.PodSpec, additionalTLSContainers ...string) error {
+	tlsContainers := make(map[string]struct{}, len(additionalTLSContainers))
+	for _, name := range additionalTLSContainers {
+		tlsContainers[name] = struct{}{}
+	}
+	for i := range podSpec.Containers {
+		if containerHasTLSCredentials(&podSpec.Containers[i]) {
+			tlsContainers[podSpec.Containers[i].Name] = struct{}{}
+		}
+	}
+	if len(tlsContainers) == 0 {
+		return nil
+	}
+
 	apiServer := &configv1.APIServer{}
 	var profileSpec *configv1.TLSProfileSpec
 	if err := reader.Get(ctx, client.ObjectKey{Name: apiServerName}, apiServer); err != nil {
@@ -53,10 +68,37 @@ func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec
 	}
 
 	for i := range podSpec.Containers {
+		if _, ok := tlsContainers[podSpec.Containers[i].Name]; !ok {
+			continue
+		}
 		setContainerEnv(&podSpec.Containers[i], tlsMinVersionEnv, string(profileSpec.MinTLSVersion))
 		setContainerEnv(&podSpec.Containers[i], tlsCiphersEnv, strings.Join(profileSpec.Ciphers, ":"))
 	}
 	return nil
+}
+
+func containerHasTLSCredentials(container *corev1.Container) bool {
+	hasCert, hasKey := false, false
+	for _, env := range container.Env {
+		switch env.Name {
+		case constants.TransformerTLSCertEnvVar:
+			hasCert = true
+		case constants.TransformerTLSKeyEnvVar:
+			hasKey = true
+		}
+	}
+	for i := range len(container.Args) {
+		arg := container.Args[i]
+		switch {
+		case arg == "--ssl_certfile" || arg == "--ssl-certfile" ||
+			strings.HasPrefix(arg, "--ssl_certfile=") || strings.HasPrefix(arg, "--ssl-certfile="):
+			hasCert = true
+		case arg == "--ssl_keyfile" || arg == "--ssl-keyfile" ||
+			strings.HasPrefix(arg, "--ssl_keyfile=") || strings.HasPrefix(arg, "--ssl-keyfile="):
+			hasKey = true
+		}
+	}
+	return hasCert && hasKey
 }
 
 func effectiveTLSProfileSpec(apiServer *configv1.APIServer) *configv1.TLSProfileSpec {

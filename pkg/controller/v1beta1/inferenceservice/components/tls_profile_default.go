@@ -25,6 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func injectTLSSecurityProfile(_ context.Context, _ client.Reader, _ *corev1.PodSpec) error {
+func injectTLSSecurityProfile(_ context.Context, _ client.Reader, _ *corev1.PodSpec, _ ...string) error {
 	return nil
 }

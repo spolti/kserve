@@ -31,6 +31,17 @@ def test_apply_profile_sets_openssl_ciphers():
     assert set(INTERMEDIATE_PROFILE["ciphers"]).issubset(enabled)
 
 
+def test_intermediate_profile_matches_openshift():
+    assert INTERMEDIATE_PROFILE["ciphers"] == [
+        "ECDHE-RSA-AES128-GCM-SHA256",
+        "ECDHE-ECDSA-AES128-GCM-SHA256",
+        "ECDHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-ECDSA-CHACHA20-POLY1305",
+        "ECDHE-RSA-CHACHA20-POLY1305",
+    ]
+
+
 def test_apply_profile_restores_default_ciphers_for_empty_profile():
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     default_ciphers = tuple(cipher["name"] for cipher in context.get_ciphers())
