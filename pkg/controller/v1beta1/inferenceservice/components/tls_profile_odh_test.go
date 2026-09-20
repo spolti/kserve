@@ -25,8 +25,11 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestInjectTLSSecurityProfile(t *testing.T) {
@@ -73,6 +76,34 @@ func TestInjectTLSSecurityProfileUsesIntermediateWhenAPIUnavailable(t *testing.T
 	intermediate := configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
 	assertEnv(t, podSpec.Containers[0], tlsMinVersionEnv, string(intermediate.MinTLSVersion))
 	assertEnv(t, podSpec.Containers[0], tlsCiphersEnv, strings.Join(intermediate.Ciphers, ":"))
+}
+
+func TestInjectTLSSecurityProfilePreservesWorkloadOnTransientError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := configv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	reader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+				return apierrors.NewServiceUnavailable("APIServer profile is temporarily unavailable")
+			},
+		}).
+		Build()
+	podSpec := &corev1.PodSpec{Containers: []corev1.Container{{
+		Name: "predictor",
+		Env: []corev1.EnvVar{
+			{Name: tlsMinVersionEnv, Value: "VersionTLS13"},
+			{Name: tlsCiphersEnv, Value: ""},
+		},
+	}}}
+
+	if err := injectTLSSecurityProfile(context.Background(), reader, podSpec); err == nil {
+		t.Fatal("expected transient APIServer error to be returned")
+	}
+	assertEnv(t, podSpec.Containers[0], tlsMinVersionEnv, "VersionTLS13")
+	assertEnv(t, podSpec.Containers[0], tlsCiphersEnv, "")
 }
 
 func assertEnv(t *testing.T, container corev1.Container, name, want string) {

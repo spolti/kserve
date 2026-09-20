@@ -20,7 +20,6 @@ package components
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -41,13 +40,10 @@ func injectTLSSecurityProfile(ctx context.Context, reader client.Reader, podSpec
 	apiServer := &configv1.APIServer{}
 	var profileSpec *configv1.TLSProfileSpec
 	if err := reader.Get(ctx, client.ObjectKey{Name: apiServerName}, apiServer); err != nil {
-		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) ||
-			apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) ||
-			apierrors.IsServiceUnavailable(err) || apierrors.IsTimeout(err) ||
-			apierrors.IsServerTimeout(err) || apierrors.IsTooManyRequests(err) ||
-			errors.Is(err, context.DeadlineExceeded) {
-			// Use hardened defaults when the OpenShift profile API is unavailable. This
-			// also keeps distro builds secure when run on generic Kubernetes clusters.
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) {
+			// Use hardened defaults when the OpenShift profile API does not exist. Return
+			// transient and authorization errors so reconciliation preserves the currently
+			// deployed profile instead of silently replacing it with a weaker fallback.
 			profileSpec = configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
 		} else {
 			return err
