@@ -31,14 +31,35 @@ func addExpectedTLSSecurityProfile(podSpec *corev1.PodSpec) {
 	profile := configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
 	for i := range podSpec.Containers {
 		container := &podSpec.Containers[i]
-		// Authentication proxies are added after component reconciliation, so they
-		// do not receive the workload TLS profile.
-		if container.Name == constants.KubeRbacContainerName || container.Name == constants.OauthProxyContainerName {
+		if !expectedContainerHasTLSCredentials(container) {
 			continue
 		}
 		setExpectedTLSEnv(container, "KSERVE_TLS_MIN_VERSION", string(profile.MinTLSVersion))
 		setExpectedTLSEnv(container, "KSERVE_TLS_CIPHERS", strings.Join(profile.Ciphers, ":"))
 	}
+}
+
+func expectedContainerHasTLSCredentials(container *corev1.Container) bool {
+	hasCert, hasKey := false, false
+	for _, env := range container.Env {
+		switch env.Name {
+		case constants.TransformerTLSCertEnvVar:
+			hasCert = true
+		case constants.TransformerTLSKeyEnvVar:
+			hasKey = true
+		}
+	}
+	for _, arg := range container.Args {
+		switch {
+		case arg == "--ssl_certfile" || arg == "--ssl-certfile" ||
+			strings.HasPrefix(arg, "--ssl_certfile=") || strings.HasPrefix(arg, "--ssl-certfile="):
+			hasCert = true
+		case arg == "--ssl_keyfile" || arg == "--ssl-keyfile" ||
+			strings.HasPrefix(arg, "--ssl_keyfile=") || strings.HasPrefix(arg, "--ssl-keyfile="):
+			hasKey = true
+		}
+	}
+	return hasCert && hasKey
 }
 
 func setExpectedTLSEnv(container *corev1.Container, name, value string) {
