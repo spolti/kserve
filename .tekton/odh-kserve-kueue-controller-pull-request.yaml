@@ -29,9 +29,16 @@ spec:
     value: kserve-kueue-controller.Dockerfile
   - name: path-context
     value: .
+  - name: build-platforms
+    value:
+    - linux/x86_64
+    - linux/arm64
+    - linux/ppc64le
+    - linux/s390x
   - name: additional-tags
     value:
     - 'odh-pr-{{revision}}'
+    - 'odh-pr-{{pull_request_number}}'
   - name: pipeline-type
     value: pull-request
   pipelineRef:
