@@ -740,7 +740,7 @@ func TestPresetFiles(t *testing.T) {
 		},
 	}
 
-	remaining := llmisvc.WellKnownDefaultConfigs.Union(llmisvc.WellKnownBaseRefConfigs)
+	remaining := upstreamPresetNamesForTest().Union(llmisvc.WellKnownBaseRefConfigs)
 
 	_ = filepath.Walk(presetsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
