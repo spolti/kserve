@@ -1,0 +1,14 @@
+---
+- name: Tag and push images to kind registry
+  ansible.builtin.shell: |
+    {{ engine }} tag {{ item }} localhost:{{ kind_registry_port }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
+    {{ engine }} push localhost:{{ kind_registry_port }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
+  loop: "{{ built_images }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Set registry image references
+  ansible.builtin.set_fact:
+    imported_images: >-
+      {{ built_images | map('regex_replace', '^(.+):(.+)$',
+         'localhost:' ~ kind_registry_port ~ '/\1:\2') | list }}

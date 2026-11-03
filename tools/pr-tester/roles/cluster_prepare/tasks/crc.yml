@@ -1,0 +1,50 @@
+---
+- name: Check if crc is installed
+  ansible.builtin.command: crc version
+  changed_when: false
+
+- name: Check CRC status
+  ansible.builtin.command: crc status --output json
+  changed_when: false
+  failed_when: false
+  register: _crc_status
+
+- name: Start CRC cluster
+  ansible.builtin.command: crc start
+  when: _crc_status.rc != 0 or '"Running"' not in _crc_status.stdout
+  timeout: 1200
+
+- name: Get oc login command
+  ansible.builtin.command: crc console --credentials --output json
+  changed_when: false
+  register: _crc_creds
+
+- name: Configure oc CLI
+  ansible.builtin.shell: |
+    eval $(crc oc-env)
+    oc login -u kubeadmin -p $(crc console --credentials -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['clusterConfig']['adminCredentials']['password'])") \
+      https://api.crc.testing:6443 --insecure-skip-tls-verify=true
+  changed_when: true
+
+- name: Expose internal registry on CRC
+  ansible.builtin.command: oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"defaultRoute":true}}'
+  failed_when: false
+  changed_when: true
+
+- name: Get CRC registry route
+  ansible.builtin.command: oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}'
+  changed_when: false
+  register: _crc_registry
+  retries: 5
+  delay: 10
+  until: _crc_registry.rc == 0
+
+- name: Set CRC-specific facts
+  ansible.builtin.set_fact:
+    ko_docker_repo: "{{ _crc_registry.stdout | trim }}/{{ kserve_namespace }}"
+    cluster_ready: true
+    openshift_registry: "{{ _crc_registry.stdout | trim }}"
+
+- name: CRC cluster ready
+  ansible.builtin.debug:
+    msg: "CRC cluster ready, registry at {{ openshift_registry }}"

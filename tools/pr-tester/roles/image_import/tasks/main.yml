@@ -1,0 +1,21 @@
+---
+- name: Validate built images list
+  ansible.builtin.assert:
+    that:
+      - built_images is defined
+      - built_images | length > 0
+    fail_msg: "No images to import. The image_build role must run first."
+
+- name: Import images into cluster
+  ansible.builtin.include_tasks: "{{ cluster_type }}.yml"
+
+- name: Verify images are available in cluster
+  ansible.builtin.include_tasks: verify_images.yml
+
+- name: Display imported images
+  ansible.builtin.debug:
+    msg: |
+      Imported and verified {{ built_images | length }} image(s) in {{ cluster_type }} cluster:
+      {% for img in built_images %}
+        - {{ img }}
+      {% endfor %}

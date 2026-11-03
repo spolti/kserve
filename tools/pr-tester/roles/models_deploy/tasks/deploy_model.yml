@@ -1,0 +1,28 @@
+---
+- name: "Set model spec for {{ model_key }}"
+  ansible.builtin.set_fact:
+    _model: "{{ _model_definitions[model_key] }}"
+
+- name: "Select template for {{ _model.name }}"
+  ansible.builtin.set_fact:
+    _template_name: "{{ _model.template | default('llminferenceservice.yml.j2' if _model.kind == 'LLMInferenceService' else 'inferenceservice.yml.j2') }}"
+    _wait_resource: "{{ 'llminferenceservice' if _model.kind == 'LLMInferenceService' else 'inferenceservice' }}"
+
+- name: "Apply {{ _model.kind }} {{ _model.name }}"
+  ansible.builtin.command:
+    cmd: kubectl apply -f -
+    stdin: "{{ lookup('template', _template_name) }}"
+  vars:
+    model: "{{ _model }}"
+
+- name: "Wait for {{ _model.name }} to be ready"
+  ansible.builtin.command: >-
+    kubectl wait {{ _wait_resource }}/{{ _model.name }}
+    --for=condition=Ready
+    -n {{ test_namespace }}
+    --timeout={{ isvc_ready_timeout }}s
+  changed_when: false
+  register: _isvc_wait
+  retries: 2
+  delay: 30
+  until: _isvc_wait.rc == 0

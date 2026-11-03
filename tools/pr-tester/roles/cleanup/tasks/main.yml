@@ -1,0 +1,61 @@
+---
+- name: Determine PR number for cleanup
+  ansible.builtin.set_fact:
+    _cleanup_pr: "{{ pr_number | default('') }}"
+
+- name: Validate PR number
+  ansible.builtin.assert:
+    that:
+      - _cleanup_pr | length > 0
+    fail_msg: "pr_number must be set. Pass it with -e pr_number=1234"
+
+- name: Delete test InferenceServices
+  ansible.builtin.command: >-
+    kubectl delete inferenceservice --all -n {{ test_namespace }}
+  failed_when: false
+  changed_when: true
+
+- name: Delete test LLMInferenceServices
+  ansible.builtin.command: >-
+    kubectl delete llminferenceservice --all -n {{ test_namespace }}
+  failed_when: false
+  changed_when: true
+
+- name: Delete test namespace
+  ansible.builtin.command: kubectl delete namespace {{ test_namespace }} --ignore-not-found
+  failed_when: false
+  changed_when: true
+
+- name: Uninstall KServe
+  ansible.builtin.include_tasks: uninstall_kserve.yml
+
+- name: Destroy cluster
+  ansible.builtin.include_tasks: "destroy_{{ cluster_type }}.yml"
+  when: destroy_cluster | bool
+
+- name: Remove built container images
+  ansible.builtin.include_tasks: remove_images.yml
+
+- name: Find and remove sandbox directory
+  ansible.builtin.find:
+    paths: "{{ sandbox_base }}"
+    patterns: "pr-{{ _cleanup_pr }}-*"
+    file_type: directory
+  register: _sandbox_dirs
+
+- name: Remove sandbox directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _sandbox_dirs.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Cleanup complete
+  ansible.builtin.debug:
+    msg: |
+      Cleanup complete for PR #{{ _cleanup_pr }}:
+        - Test resources deleted
+        - KServe uninstalled
+        - Cluster {{ 'destroyed' if destroy_cluster | bool else 'preserved' }}
+        - Sandbox removed

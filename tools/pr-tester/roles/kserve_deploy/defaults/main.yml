@@ -1,0 +1,3 @@
+deployment_mode: raw
+deploy_timeout: 600
+kserve_namespace: kserve

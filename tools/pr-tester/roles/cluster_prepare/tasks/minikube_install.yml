@@ -1,0 +1,88 @@
+---
+# Shared minikube install/upgrade logic.
+# Used by both the cluster_prepare role and the standalone setup-minikube.yml playbook.
+# Installs minikube into a local bin/ directory next to the playbook (no sudo required).
+
+- name: Set local bin directory
+  ansible.builtin.set_fact:
+    _local_bin: "{{ playbook_dir }}/bin"
+
+- name: Ensure local bin directory exists
+  ansible.builtin.file:
+    path: "{{ _local_bin }}"
+    state: directory
+    mode: "0755"
+
+- name: Fetch latest minikube release version
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/kubernetes/minikube/releases/latest
+    return_content: true
+    headers:
+      Accept: application/vnd.github+json
+  register: _minikube_latest
+  changed_when: false
+  when: minikube_auto_upgrade | default(true) | bool
+
+- name: Set latest version fact
+  ansible.builtin.set_fact:
+    _minikube_latest_version: "{{ _minikube_latest.json.tag_name }}"
+  when: minikube_auto_upgrade | default(true) | bool
+
+- name: Check if minikube is installed (local bin or PATH)
+  ansible.builtin.shell: |
+    if [ -x "{{ _local_bin }}/minikube" ]; then
+      "{{ _local_bin }}/minikube" version --short
+    elif command -v minikube &>/dev/null; then
+      minikube version --short
+    else
+      exit 1
+    fi
+  changed_when: false
+  failed_when: false
+  register: _minikube_current
+
+- name: Set current version fact
+  ansible.builtin.set_fact:
+    _minikube_installed: "{{ _minikube_current.rc == 0 }}"
+    _minikube_current_version: "{{ _minikube_current.stdout | trim | default('none') }}"
+
+- name: Determine if install/upgrade is needed
+  ansible.builtin.set_fact:
+    _minikube_needs_install: >-
+      {{ not _minikube_installed or
+         (minikube_auto_upgrade | default(true) | bool and
+          _minikube_latest_version is defined and
+          _minikube_latest_version not in _minikube_current_version) }}
+
+- name: Display version info
+  ansible.builtin.debug:
+    msg: |
+      Minikube current: {{ _minikube_current_version if _minikube_installed else 'not installed' }}
+      {% if _minikube_latest_version is defined %}Latest: {{ _minikube_latest_version }}{% endif %}
+      Install path: {{ _local_bin }}/minikube
+      Action: {{ 'install/upgrade' if _minikube_needs_install | bool else 'already up to date' }}
+
+- name: Detect OS and architecture
+  ansible.builtin.set_fact:
+    _minikube_os: "{{ 'darwin' if ansible_facts['system'] == 'Darwin' else 'linux' }}"
+    _minikube_arch: "{{ 'arm64' if ansible_facts['architecture'] in ['aarch64', 'arm64'] else 'amd64' }}"
+  when: _minikube_needs_install | bool
+
+- name: Download minikube binary
+  ansible.builtin.get_url:
+    url: "https://storage.googleapis.com/minikube/releases/{{ _minikube_latest_version }}/minikube-{{ _minikube_os }}-{{ _minikube_arch }}"
+    dest: "{{ _local_bin }}/minikube"
+    mode: "0755"
+    force: true
+  when: _minikube_needs_install | bool
+
+- name: Verify installed version
+  ansible.builtin.command: "{{ _local_bin }}/minikube version --short"
+  changed_when: false
+  register: _minikube_verified
+  environment:
+    PATH: "{{ _local_bin }}:{{ lookup('env', 'PATH') }}"
+
+- name: Display installed version
+  ansible.builtin.debug:
+    msg: "Minikube {{ _minikube_verified.stdout | trim }} installed at {{ _local_bin }}/minikube"

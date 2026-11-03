@@ -1,0 +1,66 @@
+---
+- name: "Set model spec for {{ model_key }}"
+  ansible.builtin.set_fact:
+    _model: "{{ _model_definitions[model_key] }}"
+  when: model_key in _model_definitions
+
+- name: "Get {{ model_key }} ISVC URL"
+  ansible.builtin.command: >-
+    kubectl get inferenceservice {{ _model.name }}
+    -n {{ test_namespace }}
+    -o jsonpath='{.status.url}'
+  changed_when: false
+  register: _model_url
+  when: _model is defined
+
+- name: "Port-forward to {{ model_key }} (Kind/minikube)"
+  ansible.builtin.shell: |
+    kubectl port-forward -n {{ test_namespace }} \
+      svc/{{ _model.name }}-predictor 8280:80 &
+    echo $!
+  register: _port_forward
+  changed_when: true
+  when:
+    - _model is defined
+    - cluster_type in ['kind', 'minikube']
+
+- name: Wait for port-forward to establish
+  ansible.builtin.wait_for:
+    port: 8280
+    timeout: 15
+  when:
+    - _model is defined
+    - cluster_type in ['kind', 'minikube']
+
+- name: "Send test inference to {{ model_key }}"
+  ansible.builtin.uri:
+    url: "http://localhost:8280/v1/models/{{ _model.name }}:predict"
+    method: POST
+    body: "{{ _model.inference_payload }}"
+    body_format: json
+    status_code: [200]
+    timeout: 30
+  register: _inference_result
+  failed_when: false
+  when:
+    - _model is defined
+    - _model.inference_payload is defined
+    - cluster_type in ['kind', 'minikube']
+
+- name: "Display inference result for {{ model_key }}"
+  ansible.builtin.debug:
+    msg: |
+      Inference test for {{ model_key }}:
+      Status: {{ _inference_result.status | default('N/A') }}
+      Response: {{ _inference_result.json | default('N/A') | to_nice_json }}
+  when:
+    - _inference_result is defined
+    - _inference_result is not skipped
+
+- name: "Kill port-forward for {{ model_key }}"
+  ansible.builtin.command: "kill {{ _port_forward.stdout_lines[-1] }}"
+  failed_when: false
+  changed_when: true
+  when:
+    - _port_forward is defined
+    - _port_forward is not skipped

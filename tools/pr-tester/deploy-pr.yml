@@ -1,0 +1,87 @@
+---
+# KServe PR Local Test Automation
+#
+# Usage:
+#   ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1234
+#
+# Options:
+#   -e cluster_type=kind|minikube|crc|openshift
+#   -e engine=docker|podman
+#   -e deployment_mode=raw|serverless
+#   -e skip_security_scan=true
+#   -e enable_copilot_review=true     (posts @copilot review comment on the GitHub PR)
+#   -e auto_detect_components=false    (disable auto-detection, use manual config)
+#   -e models_to_deploy='["sklearn-iris","xgboost-iris"]'
+#   -e deploy_canary_model=true          (add sklearn canary ISVC with canary revisions)
+#
+- name: KServe PR Local Test
+  hosts: localhost
+  gather_facts: true
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - pr_url is defined
+          - pr_url | length > 0
+        fail_msg: |
+          pr_url is required. Usage:
+            ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1234
+
+    - name: Auto-detect container engine
+      when: engine == 'auto'
+      block:
+        - name: Check for docker
+          ansible.builtin.command: docker info
+          changed_when: false
+          failed_when: false
+          register: _docker_check
+
+        - name: Check for podman
+          ansible.builtin.command: podman info
+          changed_when: false
+          failed_when: false
+          register: _podman_check
+
+        - name: Set engine from detection
+          ansible.builtin.set_fact:
+            engine: "{{ 'docker' if (_docker_check.rc | default(1)) == 0 else 'podman' if (_podman_check.rc | default(1)) == 0 else 'docker' }}"
+
+        - name: Fail if no container engine found
+          ansible.builtin.fail:
+            msg: "No container engine found. Install docker or podman first."
+          when:
+            - (_docker_check.rc | default(1)) != 0
+            - (_podman_check.rc | default(1)) != 0
+
+    - name: Display configuration
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            KServe PR Test Configuration
+          ========================================
+          PR URL:          {{ pr_url }}
+          Cluster:         {{ cluster_type }}
+          Engine:          {{ engine }}
+          Deploy mode:     {{ deployment_mode }}
+          Auto-detect:     {{ 'enabled' if auto_detect_components | default(true) | bool else 'disabled' }}
+          Security scan:   {{ 'skip' if skip_security_scan | bool else 'enabled' }}
+          Canary model:    {{ 'enabled' if deploy_canary_model | default(false) | bool else 'disabled' }}
+          Copilot review:  {{ 'enabled' if enable_copilot_review | bool else 'disabled' }}
+          ========================================
+
+    - name: Append canary model to deploy list
+      ansible.builtin.set_fact:
+        models_to_deploy: "{{ models_to_deploy + ['sklearn-canary'] }}"
+      when: deploy_canary_model | default(false) | bool
+
+  roles:
+    - role: pr_fetch
+    - role: pr_analyze
+    - role: security_scan
+    - role: image_build
+    - role: cluster_prepare
+    - role: image_import
+    - role: kserve_deploy
+    - role: models_deploy
+    - role: validate

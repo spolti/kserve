@@ -1,0 +1,376 @@
+---
+# Deploy an InferenceService with a custom Transformer + MLServer predictor.
+#
+# Uses the sentiment-analysis transformer from:
+#   https://github.com/brettmthompson/sentiment_transformer
+#
+# The predictor uses the ODH MLServer runtime with an ONNX model downloaded
+# from HuggingFace (distilbert-base-uncased-finetuned-sst-2-english).
+# The transformer tokenizes text input and forwards it to the predictor.
+#
+# Usage:
+#   ansible-playbook deploy-transformer.yml
+#
+# Options:
+#   -e transformer_namespace=kserve-transformer-test
+#   -e transformer_image=quay.io/spolti/kserve-sentiment-custom-transformer@sha256:...
+#   -e model_storage_uri=hf://optimum/distilbert-base-uncased-finetuned-sst-2-english
+#   -e mlserver_image=quay.io/opendatahub/mlserver:odh-v3.4
+#   -e isvc_name=sentiment-analysis
+#   -e cleanup=true                (tear down everything instead of deploying)
+#   -e autoscaler=none|hpa|keda    (autoscaler for the transformer, default: none)
+#   -e transformer_min_replicas=1
+#   -e transformer_max_replicas=5
+#   -e autoscale_cpu_target=50     (CPU utilization % target for HPA/KEDA)
+#
+- name: Deploy Transformer InferenceService
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    transformer_namespace: kserve-transformer-test
+    isvc_name: sentiment-analysis
+    runtime_name: mlserver-runtime
+
+    # ODH MLServer container image
+    mlserver_image: "quay.io/opendatahub/mlserver:odh-v3.5"
+
+    # Model from HuggingFace — no S3/GCS credentials needed
+    model_storage_uri: "hf://optimum/distilbert-base-uncased-finetuned-sst-2-english"
+
+    # Transformer image (digest-pinned from opendatahub-tests PR #2032)
+    transformer_image: >-
+      quay.io/spolti/kserve-sentiment-custom-transformer@sha256:6af753f5d13e07fd2d0d3da9e55ddbcd4d5cabcd9d5f4c1fbbdce06fb1e08c67
+
+    # Autoscaler: none, hpa, or keda
+    autoscaler: none
+
+    # Transformer replica bounds (used when autoscaler != none)
+    transformer_min_replicas: 1
+    transformer_max_replicas: 5
+
+    # CPU utilization target for autoscaling (percentage)
+    autoscale_cpu_target: 50
+
+    # Cleanup mode
+    cleanup: false
+
+    # Timeouts
+    deploy_timeout: 600
+
+  tasks:
+    # ── Cleanup mode ───────────────────────────────────────────────────
+    - name: Cleanup transformer deployment
+      when: cleanup | bool
+      block:
+        - name: Delete InferenceService
+          ansible.builtin.command: >-
+            kubectl delete inferenceservice {{ isvc_name }}
+            -n {{ transformer_namespace }} --ignore-not-found
+          changed_when: true
+
+        - name: Delete ServingRuntime
+          ansible.builtin.command: >-
+            kubectl delete servingruntime {{ runtime_name }}
+            -n {{ transformer_namespace }} --ignore-not-found
+          changed_when: true
+
+        - name: Delete namespace
+          ansible.builtin.command: >-
+            kubectl delete namespace {{ transformer_namespace }} --ignore-not-found
+          changed_when: true
+
+        - name: Cleanup complete
+          ansible.builtin.debug:
+            msg: "Transformer deployment cleaned up from namespace {{ transformer_namespace }}."
+
+        - name: End play after cleanup
+          ansible.builtin.meta: end_play
+
+    # ── Display configuration ─────────────────────────────────────────
+    - name: Display configuration
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            Transformer Deployment
+          ========================================
+          Namespace:        {{ transformer_namespace }}
+          ISVC name:        {{ isvc_name }}
+          Runtime:          {{ runtime_name }}
+          MLServer image:   {{ mlserver_image }}
+          Model URI:        {{ model_storage_uri }}
+          Transformer:      {{ transformer_image | truncate(72) }}
+          Autoscaler:       {{ autoscaler }}
+          {% if autoscaler != 'none' %}
+          Min replicas:     {{ transformer_min_replicas }}
+          Max replicas:     {{ transformer_max_replicas }}
+          CPU target:       {{ autoscale_cpu_target }}%
+          {% endif %}
+          ========================================
+
+    # ── Create namespace ──────────────────────────────────────────────
+    - name: Create namespace
+      ansible.builtin.command: kubectl create namespace {{ transformer_namespace }}
+      register: _ns_create
+      changed_when: _ns_create.rc == 0
+      failed_when:
+        - _ns_create.rc != 0
+        - "'already exists' not in _ns_create.stderr"
+
+    # ── Create ODH MLServer ServingRuntime ─────────────────────────────
+    # Source: https://github.com/brettmthompson/sentiment_transformer/blob/main/resources/serving_runtime.yaml
+    - name: Apply MLServer ServingRuntime
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: serving.kserve.io/v1alpha1
+          kind: ServingRuntime
+          metadata:
+            name: {{ runtime_name }}
+            namespace: {{ transformer_namespace }}
+            annotations:
+              serving.kserve.io/server-type: mlserver
+          spec:
+            annotations:
+              prometheus.kserve.io/port: "8082"
+              prometheus.kserve.io/path: /metrics
+            multiModel: false
+            protocolVersions:
+              - v2
+            supportedModelFormats:
+              - name: onnx
+                version: "1"
+              - name: sklearn
+                version: "0"
+              - name: sklearn
+                version: "1"
+              - name: xgboost
+                version: "1"
+              - name: xgboost
+                version: "2"
+              - name: lightgbm
+                version: "3"
+              - name: lightgbm
+                version: "4"
+            containers:
+              - name: kserve-container
+                image: {{ mlserver_image }}
+                env:
+                  - name: MLSERVER_MODEL_NAME
+                    value: {{ isvc_name }}
+                  - name: MLSERVER_MODEL_IMPLEMENTATION
+                    value: mlserver_onnx.OnnxModel
+                  - name: MLSERVER_MODEL_URI
+                    value: /mnt/models
+                  - name: MLSERVER_HTTP_PORT
+                    value: "8080"
+                  - name: MLSERVER_MODELS_DIR
+                    value: /mnt/models
+                startupProbe:
+                  initialDelaySeconds: 1
+                  periodSeconds: 1
+                  failureThreshold: 1
+                  exec:
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        [ -n "$(ls -A /mnt/models 2>/dev/null)" ]
+                readinessProbe:
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  failureThreshold: 3
+                  timeoutSeconds: 5
+                  httpGet:
+                    path: /v2/models/{{ isvc_name }}/ready
+                    port: 8080
+                livenessProbe:
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  failureThreshold: 6
+                  timeoutSeconds: 5
+                  httpGet:
+                    path: /v2/models/{{ isvc_name }}/ready
+                    port: 8080
+                ports:
+                  - containerPort: 8080
+                    protocol: TCP
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                      - ALL
+                  privileged: false
+                  runAsNonRoot: true
+
+    # ── Build ISVC annotations ──────────────────────────────────────────
+    - name: Build ISVC annotations
+      ansible.builtin.set_fact:
+        _isvc_annotations:
+          serving.kserve.io/deploymentMode: "RawDeployment"
+        _isvc_autoscaler_annotations: "{{ {'serving.kserve.io/autoscalerClass': autoscaler} if autoscaler != 'none' else {} }}"
+
+    - name: Merge autoscaler annotation
+      ansible.builtin.set_fact:
+        _isvc_annotations: "{{ _isvc_annotations | combine(_isvc_autoscaler_annotations) }}"
+
+    # ── Build transformer spec ────────────────────────────────────────
+    - name: Build transformer spec (no autoscaling)
+      ansible.builtin.set_fact:
+        _transformer_spec:
+          containers:
+            - name: kserve-container
+              image: "{{ transformer_image }}"
+              args:
+                - "--model-name={{ isvc_name }}"
+                - "--tokenizer_name=optimum/distilbert-base-uncased-finetuned-sst-2-english"
+                - "--sentiment_labels=negative,positive"
+                - "--max_length=128"
+                - "--input_names=input_ids,attention_mask"
+                - "--output_name=predict"
+                - "--include_star_rating"
+      when: autoscaler == 'none'
+
+    - name: Build transformer spec (with autoscaling)
+      ansible.builtin.set_fact:
+        _transformer_spec:
+          minReplicas: "{{ transformer_min_replicas | int }}"
+          maxReplicas: "{{ transformer_max_replicas | int }}"
+          autoScaling:
+            metrics:
+              - type: Resource
+                resource:
+                  name: cpu
+                  target:
+                    type: Utilization
+                    averageUtilization: "{{ autoscale_cpu_target | int }}"
+          containers:
+            - name: kserve-container
+              image: "{{ transformer_image }}"
+              args:
+                - "--model-name={{ isvc_name }}"
+                - "--tokenizer_name=optimum/distilbert-base-uncased-finetuned-sst-2-english"
+                - "--sentiment_labels=negative,positive"
+                - "--max_length=128"
+                - "--input_names=input_ids,attention_mask"
+                - "--output_name=predict"
+                - "--include_star_rating"
+      when: autoscaler != 'none'
+
+    # ── Create InferenceService with Transformer ──────────────────────
+    # Source: https://github.com/brettmthompson/sentiment_transformer/blob/main/resources/inference_service.yaml
+    - name: Apply InferenceService with Transformer
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: "{{ _isvc_manifest | to_nice_yaml(indent=2) }}"
+      vars:
+        _isvc_manifest:
+          apiVersion: serving.kserve.io/v1beta1
+          kind: InferenceService
+          metadata:
+            name: "{{ isvc_name }}"
+            namespace: "{{ transformer_namespace }}"
+            annotations: "{{ _isvc_annotations }}"
+          spec:
+            predictor:
+              model:
+                modelFormat:
+                  name: onnx
+                runtime: "{{ runtime_name }}"
+                storageUri: "{{ model_storage_uri }}"
+            transformer: "{{ _transformer_spec }}"
+
+    # ── Wait for readiness ────────────────────────────────────────────
+    - name: Wait for predictor deployment rollout
+      ansible.builtin.command: >-
+        kubectl rollout status deployment
+        -l serving.kserve.io/inferenceservice={{ isvc_name }},component=predictor
+        -n {{ transformer_namespace }}
+        --timeout={{ deploy_timeout }}s
+      changed_when: false
+      register: _predictor_rollout
+      retries: 3
+      delay: 10
+      until: _predictor_rollout.rc == 0
+
+    - name: Wait for transformer deployment rollout
+      ansible.builtin.command: >-
+        kubectl rollout status deployment
+        -l serving.kserve.io/inferenceservice={{ isvc_name }},component=transformer
+        -n {{ transformer_namespace }}
+        --timeout={{ deploy_timeout }}s
+      changed_when: false
+      register: _transformer_rollout
+      retries: 3
+      delay: 10
+      until: _transformer_rollout.rc == 0
+
+    - name: Wait for InferenceService Ready condition
+      ansible.builtin.command: >-
+        kubectl wait inferenceservice/{{ isvc_name }}
+        --for=condition=Ready
+        -n {{ transformer_namespace }}
+        --timeout={{ deploy_timeout }}s
+      changed_when: false
+      register: _isvc_ready
+      retries: 2
+      delay: 30
+      until: _isvc_ready.rc == 0
+
+    # ── Show status ───────────────────────────────────────────────────
+    - name: Get InferenceService status
+      ansible.builtin.command: >-
+        kubectl get inferenceservice {{ isvc_name }}
+        -n {{ transformer_namespace }} -o wide
+      changed_when: false
+      register: _isvc_status
+
+    - name: Get InferenceService URL
+      ansible.builtin.command: >-
+        kubectl get inferenceservice {{ isvc_name }}
+        -n {{ transformer_namespace }}
+        -o jsonpath='{.status.url}'
+      changed_when: false
+      register: _isvc_url
+
+    - name: Get pods
+      ansible.builtin.command: >-
+        kubectl get pods -n {{ transformer_namespace }}
+        -l serving.kserve.io/inferenceservice={{ isvc_name }}
+        -o wide
+      changed_when: false
+      register: _pods
+
+    - name: Deployment summary
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            Transformer Deployment Complete
+          ========================================
+
+          ISVC Status:
+          {{ _isvc_status.stdout }}
+
+          ISVC URL: {{ _isvc_url.stdout | default('pending') }}
+
+          Pods:
+          {{ _pods.stdout }}
+
+          ----------------------------------------
+            Test Inference
+          ----------------------------------------
+          Port-forward to the transformer:
+            kubectl port-forward -n {{ transformer_namespace }} \
+              svc/{{ isvc_name }}-transformer 8080:80
+
+          Then send a request:
+            curl -X POST http://localhost:8080/v1/models/{{ isvc_name }}:predict \
+              -H "Content-Type: application/json" \
+              -d '{"texts": ["This product is amazing!", "Terrible experience."]}'
+
+          ----------------------------------------
+            Cleanup
+          ----------------------------------------
+            ansible-playbook deploy-transformer.yml -e cleanup=true
+
+          ========================================

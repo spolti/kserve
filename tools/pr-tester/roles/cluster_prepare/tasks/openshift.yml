@@ -1,0 +1,43 @@
+---
+- name: Verify oc CLI is available
+  ansible.builtin.command: oc version --client
+  changed_when: false
+
+- name: Verify OpenShift cluster connectivity
+  ansible.builtin.command: oc whoami
+  changed_when: false
+  register: _oc_whoami
+
+- name: Display logged-in user
+  ansible.builtin.debug:
+    msg: "Connected to OpenShift as {{ _oc_whoami.stdout | trim }}"
+
+- name: Get cluster API URL
+  ansible.builtin.command: oc whoami --show-server
+  changed_when: false
+  register: _oc_server
+
+- name: Check for internal registry route
+  ansible.builtin.command: oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}'
+  changed_when: false
+  failed_when: false
+  register: _ocp_registry
+
+- name: Set registry from route (if available)
+  ansible.builtin.set_fact:
+    openshift_registry: "{{ _ocp_registry.stdout | trim }}"
+  when: _ocp_registry.rc == 0 and _ocp_registry.stdout | trim | length > 0
+
+- name: Fall back to image-registry.openshift-image-registry.svc
+  ansible.builtin.set_fact:
+    openshift_registry: "image-registry.openshift-image-registry.svc:5000"
+  when: openshift_registry is not defined
+
+- name: Set OpenShift-specific facts
+  ansible.builtin.set_fact:
+    ko_docker_repo: "{{ openshift_registry }}/{{ kserve_namespace }}"
+    cluster_ready: true
+
+- name: OpenShift cluster ready
+  ansible.builtin.debug:
+    msg: "OpenShift cluster at {{ _oc_server.stdout | trim }}, registry: {{ openshift_registry }}"

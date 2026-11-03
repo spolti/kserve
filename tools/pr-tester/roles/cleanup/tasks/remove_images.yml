@@ -1,0 +1,19 @@
+---
+- name: Set image tag for cleanup
+  ansible.builtin.set_fact:
+    _cleanup_tag: "{{ image_tag_prefix }}-{{ _cleanup_pr }}"
+
+- name: Find images with PR tag
+  ansible.builtin.shell: |
+    {{ engine }} images --format '{%raw%}{{.Repository}}:{{.Tag}}{%endraw%}' | grep ":{{ _cleanup_tag }}" || true
+  changed_when: false
+  register: _pr_images
+
+- name: Remove PR-tagged images
+  ansible.builtin.command: "{{ engine }} rmi {{ item }}"
+  loop: "{{ _pr_images.stdout_lines }}"
+  loop_control:
+    label: "{{ item }}"
+  when: _pr_images.stdout_lines | length > 0
+  failed_when: false
+  changed_when: true

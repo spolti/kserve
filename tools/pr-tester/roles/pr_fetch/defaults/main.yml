@@ -1,0 +1,3 @@
+pr_url: ""
+sandbox_base: /tmp/kserve-pr-sandbox
+enable_copilot_review: false

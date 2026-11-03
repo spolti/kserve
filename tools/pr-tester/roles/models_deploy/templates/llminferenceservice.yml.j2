@@ -1,0 +1,40 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: LLMInferenceService
+metadata:
+  name: {{ model.name }}
+  namespace: {{ test_namespace }}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/pr: "{{ pr_number }}"
+spec:
+  model:
+    uri: "{{ model.model_uri }}"
+    name: "{{ model.model_name }}"
+  replicas: {{ model.replicas | default(1) }}
+  router:
+    scheduler: {}
+    route: {}
+    gateway: {}
+  template:
+    containers:
+      - name: main
+        image: {{ model.vllm_image }}
+        securityContext:
+          runAsNonRoot: false
+        env:
+          - name: VLLM_LOGGING_LEVEL
+            value: DEBUG
+          - name: VLLM_CPU_KVCACHE_SPACE
+            value: "1"
+        resources:
+          limits:
+            cpu: "{{ model.cpu_limit | default('1') }}"
+            memory: "{{ model.memory_limit | default('10Gi') }}"
+          requests:
+            cpu: "{{ model.cpu_request | default('100m') }}"
+            memory: "{{ model.memory_request | default('8Gi') }}"
+        livenessProbe:
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 30
+          failureThreshold: 5

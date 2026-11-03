@@ -1,0 +1,45 @@
+---
+# Verify that all built images are available inside the cluster node(s).
+
+- name: Set verify command prefix
+  ansible.builtin.set_fact:
+    _verify_minikube_cmd: "{{ _minikube_cmd | default('minikube') }}"
+    _verify_minikube_env: "{{ _minikube_env | default({}) }}"
+  when: cluster_type == 'minikube'
+
+- name: Check each image in cluster
+  ansible.builtin.shell: |
+    {% if cluster_type == 'minikube' %}
+    {{ _verify_minikube_cmd }} image ls 2>/dev/null | grep -q '{{ item.split(":")[0] }}:{{ pr_image_tag }}'
+    {% elif cluster_type == 'kind' %}
+    docker exec {{ kind_cluster_name }}-control-plane crictl images 2>/dev/null | grep -q '{{ item.split(":")[0] }}'
+    {% else %}
+    echo "skipping verification for {{ cluster_type }}"
+    {% endif %}
+  args:
+    executable: /bin/bash
+  environment: "{{ _verify_minikube_env | default({}) }}"
+  changed_when: false
+  failed_when: false
+  register: _image_checks
+  loop: "{{ built_images }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Display verification results
+  ansible.builtin.debug:
+    msg: "{{ item.item }}: {{ 'FOUND' if item.rc == 0 else 'MISSING' }}"
+  loop: "{{ _image_checks.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Fail if any image is missing
+  ansible.builtin.fail:
+    msg: |
+      Image '{{ item.item }}' was NOT found in the {{ cluster_type }} cluster.
+      Verify manually:
+      {% if cluster_type == 'minikube' %}  {{ _verify_minikube_cmd | default('minikube') }} image ls | grep {{ pr_image_tag }}{% elif cluster_type == 'kind' %}  docker exec {{ kind_cluster_name }}-control-plane crictl images | grep {{ pr_image_tag }}{% endif %}
+  when: item.rc != 0
+  loop: "{{ _image_checks.results }}"
+  loop_control:
+    label: "{{ item.item }}"

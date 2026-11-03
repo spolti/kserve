@@ -1,0 +1,103 @@
+---
+- name: Check if kind is installed
+  ansible.builtin.command: kind --version
+  changed_when: false
+  failed_when: false
+  register: _kind_check
+
+- name: Install kind if missing
+  ansible.builtin.command:
+    cmd: "{{ source_dir }}/hack/setup/cli/install-kind.sh"
+  when: _kind_check.rc != 0
+
+- name: Check if kind cluster already exists
+  ansible.builtin.command: kind get clusters
+  changed_when: false
+  register: _kind_clusters
+
+- name: Set cluster existence fact
+  ansible.builtin.set_fact:
+    _kind_cluster_exists: "{{ kind_cluster_name in _kind_clusters.stdout_lines }}"
+
+- name: Create kind registry container
+  when: not _kind_cluster_exists
+  block:
+    - name: Check if registry container is running
+      ansible.builtin.command: "{{ engine }} inspect -f '{%raw%}{{.State.Running}}{%endraw%}' kind-registry"
+      changed_when: false
+      failed_when: false
+      register: _registry_check
+
+    - name: Start local registry
+      ansible.builtin.command: >-
+        {{ engine }} run -d --restart=always
+        -p "127.0.0.1:{{ kind_registry_port }}:5000"
+        --name kind-registry
+        registry:2
+      when: _registry_check.rc != 0 or _registry_check.stdout | trim != 'true'
+
+- name: Create kind cluster
+  when: not _kind_cluster_exists
+  block:
+    - name: Write kind cluster config
+      ansible.builtin.copy:
+        dest: "/tmp/kind-config-{{ kind_cluster_name }}.yaml"
+        mode: "0644"
+        content: |
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          containerdConfigPatches:
+          - |-
+            [plugins."io.containerd.grpc.v1.cri".registry]
+              config_path = "/etc/containerd/certs.d"
+          nodes:
+            - role: control-plane
+            - role: worker
+
+    - name: Create kind cluster
+      ansible.builtin.command: >-
+        kind create cluster
+        --name {{ kind_cluster_name }}
+        --config /tmp/kind-config-{{ kind_cluster_name }}.yaml
+      register: _kind_create
+
+    - name: Connect registry to kind network
+      ansible.builtin.command: "{{ engine }} network connect kind kind-registry"
+      failed_when: false
+      changed_when: true
+
+    - name: Configure containerd on kind nodes to use local registry
+      ansible.builtin.shell: |
+        for node in $(kind get nodes --name {{ kind_cluster_name }}); do
+          {{ engine }} exec "$node" mkdir -p /etc/containerd/certs.d/localhost:{{ kind_registry_port }}
+          echo '[host."http://kind-registry:5000"]' | \
+            {{ engine }} exec -i "$node" sh -c "cat > /etc/containerd/certs.d/localhost:{{ kind_registry_port }}/hosts.toml"
+        done
+
+    - name: Document local registry in cluster
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: local-registry-hosting
+            namespace: kube-public
+          data:
+            localRegistryHosting.v1: |
+              host: "localhost:{{ kind_registry_port }}"
+              help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+
+    - name: Clean up kind config file
+      ansible.builtin.file:
+        path: "/tmp/kind-config-{{ kind_cluster_name }}.yaml"
+        state: absent
+
+- name: Kind cluster ready
+  ansible.builtin.debug:
+    msg: "Kind cluster '{{ kind_cluster_name }}' ready with registry at localhost:{{ kind_registry_port }}"
+
+- name: Set kind-specific facts
+  ansible.builtin.set_fact:
+    ko_docker_repo: "localhost:{{ kind_registry_port }}"
+    cluster_ready: true

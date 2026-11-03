@@ -1,0 +1,25 @@
+---
+- name: Check if source_dir is set (from deploy run)
+  ansible.builtin.set_fact:
+    _has_source: "{{ source_dir is defined and source_dir | length > 0 }}"
+
+- name: Uninstall via kserve-install.sh
+  ansible.builtin.command: "{{ source_dir }}/hack/kserve-install.sh --uninstall"
+  args:
+    chdir: "{{ source_dir }}"
+  when: _has_source | bool
+  failed_when: false
+  changed_when: true
+
+- name: Uninstall via kubectl (fallback)
+  when: not (_has_source | bool)
+  block:
+    - name: Delete KServe CRDs
+      ansible.builtin.command: kubectl delete crd --selector=app.kubernetes.io/part-of=kserve
+      failed_when: false
+      changed_when: true
+
+    - name: Delete kserve namespace
+      ansible.builtin.command: kubectl delete namespace {{ kserve_namespace }} --ignore-not-found
+      failed_when: false
+      changed_when: true

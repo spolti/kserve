@@ -1,0 +1,4 @@
+---
+- name: OpenShift cluster preserved (external cluster)
+  ansible.builtin.debug:
+    msg: "OpenShift cluster is external and will not be destroyed. Only KServe resources were removed."

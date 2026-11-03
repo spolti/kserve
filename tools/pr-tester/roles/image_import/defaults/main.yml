@@ -1,0 +1,3 @@
+cluster_type: kind
+kind_cluster_name: kserve-pr-test
+kind_registry_port: 5001

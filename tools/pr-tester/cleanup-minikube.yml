@@ -1,0 +1,111 @@
+---
+# Delete the minikube instance created by setup-minikube.yml
+#
+# Looks for minikube in ./bin/ first, then falls back to PATH.
+#
+# Usage:
+#   ansible-playbook cleanup-minikube.yml
+#   ansible-playbook cleanup-minikube.yml -e remove_nfs_operator=true
+#
+- name: Cleanup Minikube
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    remove_nfs_operator: false
+
+  tasks:
+    - name: Locate minikube binary
+      ansible.builtin.set_fact:
+        _local_bin: "{{ playbook_dir }}/bin"
+
+    - name: Check if minikube is installed
+      ansible.builtin.shell: |
+        if [ -x "{{ _local_bin }}/minikube" ]; then
+          echo "{{ _local_bin }}/minikube"
+        elif command -v minikube &>/dev/null; then
+          command -v minikube
+        else
+          exit 1
+        fi
+      changed_when: false
+      failed_when: false
+      register: _minikube_check
+
+    - name: Set minikube command
+      ansible.builtin.set_fact:
+        _minikube_cmd: "{{ _minikube_check.stdout | trim }}"
+      when: _minikube_check.rc == 0
+
+    - name: Nothing to do
+      ansible.builtin.debug:
+        msg: "Minikube is not installed, nothing to clean up."
+      when: _minikube_check.rc != 0
+
+    - name: Cleanup minikube
+      when: _minikube_check.rc == 0
+      block:
+        - name: Check minikube status
+          ansible.builtin.command: "{{ _minikube_cmd }} status --format=json"
+          changed_when: false
+          failed_when: false
+          register: _minikube_status
+
+        - name: Remove NFS Provisioner Operator (if requested)
+          when:
+            - "remove_nfs_operator | bool"
+            - "_minikube_status.rc == 0"
+            - "'Running' in _minikube_status.stdout"
+          block:
+            - name: Delete NFSProvisioner CR
+              ansible.builtin.command: kubectl delete nfsprovisioner --all -n nfs-provisioner-operator-system
+              failed_when: false
+              changed_when: true
+
+            - name: Delete NFS operator deployment
+              ansible.builtin.command: kubectl delete deployment nfs-provisioner-controller-manager -n nfs-provisioner-operator-system --ignore-not-found
+              failed_when: false
+              changed_when: true
+
+            - name: Delete NFS operator RBAC
+              ansible.builtin.shell: |
+                kubectl delete clusterrolebinding nfs-provisioner-manager-rolebinding --ignore-not-found
+                kubectl delete clusterrole nfs-provisioner-manager-role --ignore-not-found
+              failed_when: false
+              changed_when: true
+
+            - name: Delete NFS operator namespace
+              ansible.builtin.command: kubectl delete namespace nfs-provisioner-operator-system --ignore-not-found
+              failed_when: false
+              changed_when: true
+
+            - name: Delete NFS CRDs
+              ansible.builtin.command: kubectl delete crd nfsprovisioners.cache.jhouse.com --ignore-not-found
+              failed_when: false
+              changed_when: true
+
+            - name: Delete NFS StorageClass
+              ansible.builtin.command: kubectl delete storageclass nfs --ignore-not-found
+              failed_when: false
+              changed_when: true
+
+        - name: Delete minikube cluster
+          ansible.builtin.command: "{{ _minikube_cmd }} delete"
+          failed_when: false
+          changed_when: true
+
+        - name: Verify minikube is deleted
+          ansible.builtin.command: "{{ _minikube_cmd }} status --format=json"
+          changed_when: false
+          failed_when: false
+          register: _minikube_post
+
+        - name: Cleanup complete
+          ansible.builtin.debug:
+            msg: |
+              ========================================
+                Minikube Cleanup Complete
+              ========================================
+              Minikube cluster deleted.
+              NFS operator: {{ 'removed' if remove_nfs_operator | bool else 'deleted with cluster' }}
+              ========================================
