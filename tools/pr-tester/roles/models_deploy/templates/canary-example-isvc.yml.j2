@@ -1,0 +1,27 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: sklearn-canary
+  namespace: {{ test_namespace }}
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: "gs://kfserving-examples/models/sklearn/1.0/model"
+    minReplicas: 4
+  canary:
+  - trafficPercent: 25
+    predictor:
+      name: v2
+      model:
+        modelFormat:
+          name: sklearn
+        storageUri: "gs://kfserving-examples/models/sklearn/1.0/model-2"
+  - trafficPercent: 0
+    predictor:
+      name: experimental
+      model:
+        modelFormat:
+          name: sklearn
+        storageUri: "gs://kfserving-examples/models/sklearn/1.3/mixedtype"

@@ -1,0 +1,8 @@
+# Locally installed binaries (minikube, etc.)
+bin/
+
+# PR sandbox working directories
+sandbox/
+
+# Image build logs
+build-*.log

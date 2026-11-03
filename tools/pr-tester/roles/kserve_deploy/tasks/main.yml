@@ -1,0 +1,88 @@
+---
+- name: Validate prerequisites
+  ansible.builtin.assert:
+    that:
+      - source_dir is defined
+      - ko_docker_repo is defined
+      - pr_image_tag is defined
+    fail_msg: "source_dir, ko_docker_repo, and pr_image_tag must be set by previous roles"
+
+- name: Default kserve_install_types if not set
+  ansible.builtin.set_fact:
+    kserve_install_types: "{{ kserve_install_types | default(['kserve']) }}"
+
+- name: Display install plan
+  ansible.builtin.debug:
+    msg: |
+      Deploy plan:
+        Install types: {{ kserve_install_types | join(', ') }}
+        Cluster: {{ cluster_type }}
+        Mode: {{ deployment_mode }}
+        Registry: {{ ko_docker_repo }}
+        Tag: {{ pr_image_tag }}
+
+- name: Determine deploy strategy
+  ansible.builtin.set_fact:
+    _use_make_deploy_dev: "{{ cluster_type == 'kind' and kserve_install_types | sort == ['kserve', 'llmisvc', 'localmodel'] | sort }}"
+
+- name: Deploy via make deploy-dev (Kind, all components)
+  ansible.builtin.include_tasks: deploy_dev.yml
+  when: _use_make_deploy_dev | bool
+
+- name: Deploy via kserve-install.sh (selective components)
+  ansible.builtin.include_tasks: deploy_install_script.yml
+  when: not (_use_make_deploy_dev | bool)
+
+- name: Wait for KServe controller rollout
+  ansible.builtin.command: >-
+    kubectl rollout status deployment/kserve-controller-manager
+    -n {{ kserve_namespace }}
+    --timeout={{ deploy_timeout }}s
+  changed_when: false
+  when: "'kserve' in kserve_install_types"
+
+- name: Wait for LocalModel controller rollout (if deployed)
+  ansible.builtin.command: >-
+    kubectl rollout status deployment/kserve-localmodel-controller-manager
+    -n {{ kserve_namespace }}
+    --timeout={{ deploy_timeout }}s
+  changed_when: false
+  failed_when: false
+  when: "'localmodel' in kserve_install_types"
+
+- name: Wait for LLMISvc controller rollout (if deployed)
+  ansible.builtin.command: >-
+    kubectl rollout status deployment/llmisvc-controller-manager
+    -n {{ kserve_namespace }}
+    --timeout={{ deploy_timeout }}s
+  changed_when: false
+  when: "'llmisvc' in kserve_install_types"
+
+- name: Wait for webhook to become reachable
+  ansible.builtin.shell: |
+    kubectl get endpoints kserve-webhook-server-service -n {{ kserve_namespace }} \
+      -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _webhook_ep
+  retries: 30
+  delay: 5
+  until: _webhook_ep.stdout | length > 0
+  when: "'kserve' in kserve_install_types"
+
+- name: Verify webhook is responding
+  ansible.builtin.shell: |
+    kubectl get inferenceservice -n {{ kserve_namespace }} 2>&1 || true
+  changed_when: false
+  failed_when: false
+  when: "'kserve' in kserve_install_types"
+
+- name: Display KServe pods
+  ansible.builtin.command: kubectl get pods -n {{ kserve_namespace }}
+  changed_when: false
+  register: _kserve_pods
+
+- name: Show KServe deployment status
+  ansible.builtin.debug:
+    msg: "{{ _kserve_pods.stdout }}"

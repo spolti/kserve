@@ -1,0 +1,36 @@
+---
+- name: Validate source directory
+  ansible.builtin.assert:
+    that:
+      - source_dir is defined
+      - source_dir | length > 0
+    fail_msg: "source_dir must be set by the pr_fetch role"
+
+- name: Validate requested images
+  ansible.builtin.assert:
+    that:
+      - item in _image_build_map
+    fail_msg: "Unknown image '{{ item }}'. Valid options: {{ _image_build_map.keys() | list | join(', ') }}"
+  loop: "{{ images_to_build }}"
+
+- name: Check container engine is available
+  ansible.builtin.command: "{{ engine }} version"
+  changed_when: false
+
+- name: Initialize built images list
+  ansible.builtin.set_fact:
+    built_images: []
+
+- name: Build requested images
+  ansible.builtin.include_tasks: build_one.yml
+  loop: "{{ images_to_build }}"
+  loop_control:
+    loop_var: image_key
+
+- name: Display built images
+  ansible.builtin.debug:
+    msg: |
+      Successfully built {{ built_images | length }} image(s):
+      {% for img in built_images %}
+        - {{ img }}
+      {% endfor %}

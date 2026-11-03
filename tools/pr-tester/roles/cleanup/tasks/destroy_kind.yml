@@ -1,0 +1,11 @@
+---
+- name: Delete kind cluster
+  ansible.builtin.command: kind delete cluster --name {{ kind_cluster_name }}
+  failed_when: false
+  changed_when: true
+
+- name: Stop and remove kind registry
+  ansible.builtin.shell: |
+    {{ engine }} stop kind-registry 2>/dev/null || true
+    {{ engine }} rm kind-registry 2>/dev/null || true
+  changed_when: true

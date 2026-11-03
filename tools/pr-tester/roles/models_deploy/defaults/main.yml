@@ -1,0 +1,52 @@
+test_namespace: kserve-pr-test
+isvc_ready_timeout: 300
+
+models_to_deploy:
+  - sklearn-iris
+
+# Model definitions with storage URIs and inference payloads.
+# kind: InferenceService or LLMInferenceService
+_model_definitions:
+  sklearn-iris:
+    name: sklearn-iris
+    kind: InferenceService
+    runtime: sklearn
+    storage_uri: "gs://kfserving-examples/models/sklearn/1.0/model"
+    protocol_version: v1
+    inference_payload: |
+      {"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}
+  xgboost-iris:
+    name: xgboost-iris
+    kind: InferenceService
+    runtime: xgboost
+    storage_uri: "gs://kfserving-examples/models/xgboost/iris"
+    protocol_version: v1
+    inference_payload: |
+      {"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}
+  lightgbm-iris:
+    name: lightgbm-iris
+    kind: InferenceService
+    runtime: lightgbm
+    storage_uri: "gs://kfserving-examples/models/lgb/iris"
+    protocol_version: v1
+    inference_payload: |
+      {"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}
+  sklearn-canary:
+    name: sklearn-canary
+    kind: InferenceService
+    template: canary-example-isvc.yml.j2
+    inference_payload: |
+      {"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}
+  llmisvc-opt-125m:
+    name: opt-125m-cpu
+    kind: LLMInferenceService
+    model_uri: "hf://facebook/opt-125m"
+    model_name: "facebook/opt-125m"
+    vllm_image: "public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:v0.19.0"
+    replicas: 1
+    cpu_limit: "1"
+    memory_limit: "10Gi"
+    cpu_request: "100m"
+    memory_request: "8Gi"
+    inference_payload: |
+      {"model": "facebook/opt-125m", "prompt": "Hello, world!", "max_tokens": 16}

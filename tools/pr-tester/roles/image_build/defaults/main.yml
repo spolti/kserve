@@ -1,0 +1,62 @@
+engine: auto
+image_tag_prefix: "pr"
+image_build_timeout: 1800
+
+images_to_build:
+  - controller
+  - agent
+  - router
+  - storage-initializer
+
+# Map from short name to Makefile target and Dockerfile
+_image_build_map:
+  controller:
+    make_target: docker-build
+    dockerfile: Dockerfile
+    context: "."
+    image_name: kserve-controller
+  agent:
+    make_target: docker-build-agent
+    dockerfile: agent.Dockerfile
+    context: "."
+    image_name: agent
+  router:
+    make_target: docker-build-router
+    dockerfile: router.Dockerfile
+    context: "."
+    image_name: router
+  storage-initializer:
+    make_target: docker-build-storageInitializer
+    dockerfile: storage-initializer.Dockerfile
+    context: python
+    image_name: storage-initializer
+  llmisvc-controller:
+    make_target: docker-build-llmisvc
+    dockerfile: llmisvc-controller.Dockerfile
+    context: "."
+    image_name: llmisvc-controller
+  localmodel-controller:
+    make_target: docker-build-localmodel
+    dockerfile: localmodel.Dockerfile
+    context: "."
+    image_name: kserve-localmodel-controller
+  localmodel-agent:
+    make_target: docker-build-localmodelnode-agent
+    dockerfile: localmodel-agent.Dockerfile
+    context: "."
+    image_name: kserve-localmodelnode-agent
+  sklearn:
+    make_target: docker-build-sklearn
+    dockerfile: sklearn.Dockerfile
+    context: python
+    image_name: sklearnserver
+  xgboost:
+    make_target: docker-build-xgb
+    dockerfile: xgb.Dockerfile
+    context: python
+    image_name: xgbserver
+  huggingface-cpu:
+    make_target: docker-build-huggingface-cpu
+    dockerfile: huggingface_server_cpu.Dockerfile
+    context: python
+    image_name: huggingfaceserver-cpu

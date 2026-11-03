@@ -1,0 +1,5 @@
+destroy_cluster: true
+kserve_namespace: kserve
+test_namespace: kserve-pr-test
+kind_cluster_name: kserve-pr-test
+sandbox_base: /tmp/kserve-pr-sandbox

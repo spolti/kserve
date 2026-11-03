@@ -1,0 +1,49 @@
+---
+- name: Set minikube command for image import
+  ansible.builtin.set_fact:
+    _minikube_cmd: "{{ playbook_dir }}/bin/minikube"
+    _minikube_env:
+      PATH: "{{ playbook_dir }}/bin:{{ lookup('env', 'PATH') }}"
+
+- name: Use minikube from PATH if local binary not found
+  ansible.builtin.stat:
+    path: "{{ _minikube_cmd }}"
+  register: _local_minikube
+
+- name: Fall back to PATH minikube
+  ansible.builtin.set_fact:
+    _minikube_cmd: minikube
+  when: not _local_minikube.stat.exists
+
+- name: Load images into minikube (docker engine)
+  ansible.builtin.command: "{{ _minikube_cmd }} image load {{ item }}"
+  environment: "{{ _minikube_env }}"
+  loop: "{{ built_images }}"
+  loop_control:
+    label: "{{ item }}"
+  when: engine != 'podman'
+
+- name: Load images into minikube (podman engine)
+  when: engine == 'podman'
+  block:
+    - name: Save and load podman images into minikube
+      ansible.builtin.shell: |
+        set -euo pipefail
+        IMAGE="{{ item }}"
+        TARFILE="/tmp/minikube-image-${IMAGE//[:\/]/_}.tar"
+        echo "Saving $IMAGE to $TARFILE..."
+        podman save -o "$TARFILE" "$IMAGE"
+        echo "Loading $TARFILE into minikube..."
+        {{ _minikube_cmd }} image load "$TARFILE"
+        rm -f "$TARFILE"
+        echo "Done: $IMAGE"
+      args:
+        executable: /bin/bash
+      environment: "{{ _minikube_env }}"
+      loop: "{{ built_images }}"
+      loop_control:
+        label: "{{ item }}"
+
+- name: Set minikube image references
+  ansible.builtin.set_fact:
+    imported_images: "{{ built_images }}"

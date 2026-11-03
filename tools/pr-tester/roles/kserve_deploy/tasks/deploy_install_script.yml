@@ -1,0 +1,106 @@
+---
+# Uses hack/kserve-install.sh with the detected --type flags.
+# Supports deploying kserve, llmisvc, localmodel individually or combined.
+
+- name: Set kserve-install.sh mode flag
+  ansible.builtin.set_fact:
+    _install_mode: "{{ '--raw' if deployment_mode == 'raw' else '--serverless' }}"
+
+- name: Set install method
+  ansible.builtin.set_fact:
+    _install_method: "--kustomize"
+
+- name: Build type flag
+  ansible.builtin.set_fact:
+    _type_flag: "--type {{ kserve_install_types | join(',') }}"
+
+- name: Build kserve-install.sh command
+  ansible.builtin.set_fact:
+    _install_cmd: >-
+      {{ source_dir }}/hack/kserve-install.sh
+      {{ _type_flag }}
+      {{ _install_mode }}
+      {{ _install_method }}
+
+- name: Display install command
+  ansible.builtin.debug:
+    msg: "Running: {{ _install_cmd }}"
+
+- name: Run kserve-install.sh
+  ansible.builtin.command: "{{ _install_cmd }}"
+  args:
+    chdir: "{{ source_dir }}"
+  environment:
+    KO_DOCKER_REPO: "{{ ko_docker_repo }}"
+    TAG: "{{ pr_image_tag }}"
+    ENGINE: "{{ engine }}"
+    SET_KSERVE_VERSION: "{{ pr_image_tag }}"
+    USE_LOCAL_CHARTS: "true"
+  timeout: "{{ deploy_timeout }}"
+
+- name: Patch controller deployments to use PR-built images
+  vars:
+    _img_prefix: "{{ (ko_docker_repo ~ '/') if cluster_type in ['crc', 'openshift'] else 'localhost/' if cluster_type == 'minikube' else '' }}"
+    _pull_policy: "{{ 'Always' if cluster_type in ['crc', 'openshift'] else 'IfNotPresent' }}"
+  block:
+    - name: Patch KServe controller image and pull policy
+      ansible.builtin.shell: |
+        kubectl patch deployment kserve-controller-manager -n {{ kserve_namespace }} \
+          --type=json -p='[
+            {"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": "{{ _img_prefix }}kserve-controller:{{ pr_image_tag }}"},
+            {"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "{{ _pull_policy }}"}
+          ]'
+      when: "'kserve' in kserve_install_types"
+
+    - name: Patch sidecar image env vars
+      ansible.builtin.command: >-
+        kubectl set env deployment/kserve-controller-manager
+        -n {{ kserve_namespace }}
+        AGENT_IMAGE={{ _img_prefix }}agent:{{ pr_image_tag }}
+        ROUTER_IMAGE={{ _img_prefix }}router:{{ pr_image_tag }}
+        STORAGE_INITIALIZER_IMAGE={{ _img_prefix }}storage-initializer:{{ pr_image_tag }}
+      when: "'kserve' in kserve_install_types"
+      failed_when: false
+
+    - name: Patch LLMISvc controller image and pull policy
+      ansible.builtin.shell: |
+        kubectl patch deployment llmisvc-controller-manager -n {{ kserve_namespace }} \
+          --type=json -p='[
+            {"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": "{{ _img_prefix }}llmisvc-controller:{{ pr_image_tag }}"},
+            {"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "{{ _pull_policy }}"}
+          ]'
+      when: "'llmisvc' in kserve_install_types"
+
+    - name: Patch LocalModel controller image and pull policy
+      ansible.builtin.shell: |
+        kubectl patch deployment kserve-localmodel-controller-manager -n {{ kserve_namespace }} \
+          --type=json -p='[
+            {"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": "{{ _img_prefix }}kserve-localmodel-controller:{{ pr_image_tag }}"},
+            {"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value": "{{ _pull_policy }}"}
+          ]'
+      when: "'localmodel' in kserve_install_types"
+
+    - name: Wait for patched controller rollout
+      ansible.builtin.command: >-
+        kubectl rollout status deployment/kserve-controller-manager
+        -n {{ kserve_namespace }}
+        --timeout=120s
+      changed_when: false
+      when: "'kserve' in kserve_install_types"
+
+    - name: Verify controller image and pull policy
+      ansible.builtin.shell: |
+        kubectl get deployment kserve-controller-manager -n {{ kserve_namespace }} \
+          -o jsonpath='image={.spec.template.spec.containers[0].image} pullPolicy={.spec.template.spec.containers[0].imagePullPolicy}'
+      changed_when: false
+      register: _patched_image
+      when: "'kserve' in kserve_install_types"
+
+    - name: Display patched image
+      ansible.builtin.debug:
+        msg: "Controller patched: {{ _patched_image.stdout }}"
+      when: _patched_image is defined and _patched_image.stdout is defined
+
+- name: KServe deployed via install script
+  ansible.builtin.debug:
+    msg: "Deployed types [{{ kserve_install_types | join(', ') }}] with {{ _install_mode }} {{ _install_method }}"

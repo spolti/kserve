@@ -1,0 +1,5 @@
+---
+- name: Stop CRC (preserve data)
+  ansible.builtin.command: crc stop
+  failed_when: false
+  changed_when: true

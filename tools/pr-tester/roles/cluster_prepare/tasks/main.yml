@@ -1,0 +1,18 @@
+---
+- name: Validate cluster_type
+  ansible.builtin.assert:
+    that:
+      - cluster_type in ['kind', 'minikube', 'crc', 'openshift']
+    fail_msg: "Invalid cluster_type '{{ cluster_type }}'. Must be one of: kind, minikube, crc, openshift"
+
+- name: Prepare cluster
+  ansible.builtin.include_tasks: "{{ cluster_type }}.yml"
+
+- name: Verify cluster connectivity
+  ansible.builtin.command: kubectl get nodes
+  changed_when: false
+  register: _cluster_nodes
+
+- name: Display cluster nodes
+  ansible.builtin.debug:
+    msg: "{{ _cluster_nodes.stdout }}"

@@ -1,0 +1,22 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: {{ model.name }}
+  namespace: {{ test_namespace }}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/pr: "{{ pr_number }}"
+spec:
+  predictor:
+    {{ model.runtime }}:
+      storageUri: "{{ model.storage_uri }}"
+{% if model.protocol_version is defined %}
+      protocolVersion: {{ model.protocol_version }}
+{% endif %}
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "1Gi"

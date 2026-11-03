@@ -1,0 +1,6 @@
+cluster_type: kind
+kind_cluster_name: kserve-pr-test
+kind_registry_port: 5001
+minikube_cpus: 4
+minikube_memory: 8192
+minikube_driver: docker

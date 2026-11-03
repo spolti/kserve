@@ -1,0 +1,17 @@
+---
+# Uses `make deploy-dev` for Kind clusters. This handles the full stack:
+# Gateway API, cert-manager, LWS, Envoy Gateway, KServe controllers, ClusterServingRuntimes.
+
+- name: Deploy KServe via make deploy-dev
+  ansible.builtin.command: make deploy-dev
+  args:
+    chdir: "{{ source_dir }}"
+  environment:
+    KO_DOCKER_REPO: "{{ ko_docker_repo }}"
+    TAG: "{{ pr_image_tag }}"
+    ENGINE: "{{ engine }}"
+  timeout: "{{ deploy_timeout }}"
+
+- name: KServe deployed via make deploy-dev
+  ansible.builtin.debug:
+    msg: "KServe deployed with make deploy-dev (KO_DOCKER_REPO={{ ko_docker_repo }}, TAG={{ pr_image_tag }})"

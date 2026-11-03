@@ -1,0 +1,39 @@
+---
+# KServe PR Test Cleanup
+#
+# Usage:
+#   ansible-playbook cleanup.yml -e pr_number=1234
+#
+# Options:
+#   -e cluster_type=kind|minikube|crc|openshift
+#   -e destroy_cluster=true|false
+#   -e engine=docker|podman
+#
+- name: KServe PR Test Cleanup
+  hosts: localhost
+  gather_facts: true
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - pr_number is defined
+          - pr_number | string | length > 0
+        fail_msg: |
+          pr_number is required. Usage:
+            ansible-playbook cleanup.yml -e pr_number=1234
+
+    - name: Display cleanup configuration
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            KServe PR Test Cleanup
+          ========================================
+          PR number:       {{ pr_number }}
+          Cluster type:    {{ cluster_type }}
+          Destroy cluster: {{ destroy_cluster }}
+          Engine:          {{ engine }}
+          ========================================
+
+  roles:
+    - role: cleanup

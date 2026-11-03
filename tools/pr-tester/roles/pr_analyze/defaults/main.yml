@@ -1,0 +1,117 @@
+# When true, the role auto-detects components from the PR diff and overrides
+# images_to_build, models_to_deploy, and kserve_install_types accordingly.
+# When false, the user-supplied values are used as-is.
+auto_detect_components: true
+
+# Component detection rules: file path regex -> component name.
+# Order matters: first match wins per file, but a PR touching multiple
+# components activates all of them.
+_component_rules:
+  # LLMISvc controller
+  - pattern: "(cmd/llmisvc|pkg/controller/v1alpha2/llmisvc|pkg/apis/serving/v1alpha2|config/llmisvc|config/llmisvcconfig|config/components/llmisvc|charts/kserve-llmisvc)"
+    component: llmisvc
+
+  # LocalModel / ModelCache
+  - pattern: "(cmd/localmodel|cmd/localmodelnode|pkg/controller/v1alpha1/localmodel|pkg/controller/v1alpha1/localmodelnode|config/localmodel|config/components/localmodel|charts/kserve-localmodel)"
+    component: localmodel
+
+  # Inference agent sidecar
+  - pattern: "(cmd/agent|pkg/agent|pkg/batcher|pkg/logger)"
+    component: agent
+
+  # InferenceGraph router sidecar
+  - pattern: "(cmd/router)"
+    component: router
+
+  # Storage initializer
+  - pattern: "(python/storage|python/storage-initializer|pkg/credentials)"
+    component: storage_initializer
+
+  # Python serving runtimes
+  - pattern: "(python/sklearnserver|config/runtimes/kserve-sklearnserver)"
+    component: runtime_sklearn
+  - pattern: "(python/xgbserver|config/runtimes/kserve-xgbserver)"
+    component: runtime_xgboost
+  - pattern: "(python/lgbserver|config/runtimes/kserve-lgbserver)"
+    component: runtime_lightgbm
+  - pattern: "(python/huggingfaceserver|config/runtimes/kserve-huggingfaceserver)"
+    component: runtime_huggingface
+  - pattern: "(python/pmmlserver|config/runtimes/kserve-pmmlserver)"
+    component: runtime_pmml
+  - pattern: "(python/paddleserver|config/runtimes/kserve-paddleserver)"
+    component: runtime_paddle
+
+  # Python SDK (shared library)
+  - pattern: "(python/kserve/)"
+    component: python_sdk
+
+  # Core KServe controller (InferenceService) — broad match, last
+  - pattern: "(cmd/manager|pkg/controller/v1beta1|pkg/apis/serving/v1beta1|config/default|config/manager|config/components/kserve|config/base|config/configmap|config/crd|config/rbac|config/webhook|config/certmanager|config/storagecontainers|Dockerfile$|Makefile)"
+    component: kserve
+
+# What each detected component maps to
+_component_config:
+  kserve:
+    install_types: ["kserve"]
+    images: ["controller", "agent", "router", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  llmisvc:
+    install_types: ["llmisvc"]
+    images: ["llmisvc-controller", "storage-initializer"]
+    models: ["llmisvc-opt-125m"]
+
+  localmodel:
+    install_types: ["kserve", "localmodel"]
+    images: ["controller", "localmodel-controller", "localmodel-agent", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  agent:
+    install_types: ["kserve"]
+    images: ["controller", "agent", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  router:
+    install_types: ["kserve"]
+    images: ["controller", "router"]
+    models: ["sklearn-iris"]
+
+  storage_initializer:
+    install_types: ["kserve"]
+    images: ["controller", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  runtime_sklearn:
+    install_types: ["kserve"]
+    images: ["controller", "sklearn", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  runtime_xgboost:
+    install_types: ["kserve"]
+    images: ["controller", "xgboost", "storage-initializer"]
+    models: ["xgboost-iris"]
+
+  runtime_lightgbm:
+    install_types: ["kserve"]
+    images: ["controller", "storage-initializer"]
+    models: ["lightgbm-iris"]
+
+  runtime_huggingface:
+    install_types: ["kserve"]
+    images: ["controller", "huggingface-cpu", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  runtime_pmml:
+    install_types: ["kserve"]
+    images: ["controller", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  runtime_paddle:
+    install_types: ["kserve"]
+    images: ["controller", "storage-initializer"]
+    models: ["sklearn-iris"]
+
+  python_sdk:
+    install_types: ["kserve"]
+    images: ["controller", "storage-initializer"]
+    models: ["sklearn-iris"]

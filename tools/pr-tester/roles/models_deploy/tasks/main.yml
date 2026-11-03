@@ -1,0 +1,31 @@
+---
+- name: Validate model selections
+  ansible.builtin.assert:
+    that:
+      - item in _model_definitions
+    fail_msg: "Unknown model '{{ item }}'. Valid options: {{ _model_definitions.keys() | list | join(', ') }}"
+  loop: "{{ models_to_deploy }}"
+
+- name: Ensure test namespace exists
+  ansible.builtin.command: kubectl get namespace {{ test_namespace }}
+  changed_when: false
+  failed_when: false
+  register: _test_ns
+
+- name: Create test namespace
+  ansible.builtin.command: kubectl create namespace {{ test_namespace }}
+  when: _test_ns.rc != 0
+
+- name: Deploy InferenceService for each model
+  ansible.builtin.include_tasks: deploy_model.yml
+  loop: "{{ models_to_deploy }}"
+  loop_control:
+    loop_var: model_key
+
+- name: Display deployed models
+  ansible.builtin.debug:
+    msg: |
+      Deployed {{ models_to_deploy | length }} model(s) in namespace {{ test_namespace }}:
+      {% for m in models_to_deploy %}
+        - {{ _model_definitions[m].name }}
+      {% endfor %}

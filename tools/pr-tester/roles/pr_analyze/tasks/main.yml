@@ -1,0 +1,80 @@
+---
+- name: Skip analysis if auto-detection is disabled
+  when: not (auto_detect_components | bool)
+  block:
+    - name: Use user-supplied configuration
+      ansible.builtin.debug:
+        msg: "Auto-detection disabled. Using provided images_to_build, models_to_deploy."
+    - name: Default kserve_install_types if not set
+      ansible.builtin.set_fact:
+        kserve_install_types: "{{ kserve_install_types | default(['kserve']) }}"
+
+- name: Analyze PR changes
+  when: auto_detect_components | bool
+  block:
+    - name: Get list of changed files in PR
+      ansible.builtin.command:
+        cmd: git diff --name-only origin/{{ pr_base_branch }}...HEAD
+      args:
+        chdir: "{{ source_dir }}"
+      changed_when: false
+      register: _changed_files
+
+    - name: Display changed files count
+      ansible.builtin.debug:
+        msg: "PR #{{ pr_number }} changes {{ _changed_files.stdout_lines | length }} file(s)"
+
+    - name: Detect affected components
+      ansible.builtin.set_fact:
+        _detected_components: >-
+          {{ _detected_components | default([]) | union([item.component]) }}
+      when: _changed_files.stdout | regex_search(item.pattern) is not none
+      loop: "{{ _component_rules }}"
+      loop_control:
+        label: "{{ item.component }}"
+
+    - name: Handle no detection (fallback to kserve)
+      ansible.builtin.set_fact:
+        _detected_components: ["kserve"]
+      when: _detected_components is not defined or _detected_components | length == 0
+
+    - name: Display detected components
+      ansible.builtin.debug:
+        msg: |
+          Detected components from PR diff:
+          {% for c in _detected_components %}
+            - {{ c }}
+          {% endfor %}
+
+    - name: Compute install types from detected components
+      ansible.builtin.set_fact:
+        kserve_install_types: >-
+          {{ _detected_components
+             | map('extract', _component_config, 'install_types')
+             | flatten | unique | list }}
+
+    - name: Compute images to build from detected components
+      ansible.builtin.set_fact:
+        images_to_build: >-
+          {{ _detected_components
+             | map('extract', _component_config, 'images')
+             | flatten | unique | list }}
+
+    - name: Compute models to deploy from detected components
+      ansible.builtin.set_fact:
+        models_to_deploy: >-
+          {{ _detected_components
+             | map('extract', _component_config, 'models')
+             | flatten | unique | list }}
+
+    - name: Display auto-configured pipeline
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            Auto-detected PR Configuration
+          ========================================
+          Components:    {{ _detected_components | join(', ') }}
+          Install types: {{ kserve_install_types | join(', ') }}
+          Images:        {{ images_to_build | join(', ') }}
+          Models:        {{ models_to_deploy | join(', ') }}
+          ========================================

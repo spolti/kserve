@@ -1,0 +1,109 @@
+---
+- name: Install/upgrade minikube to latest
+  ansible.builtin.include_tasks: minikube_install.yml
+
+- name: Set minikube command path
+  ansible.builtin.set_fact:
+    _minikube_cmd: "{{ _local_bin }}/minikube"
+    _minikube_env:
+      PATH: "{{ _local_bin }}:{{ lookup('env', 'PATH') }}"
+
+- name: Detect container driver
+  ansible.builtin.include_tasks: minikube_driver_detect.yml
+
+- name: Check minikube status
+  ansible.builtin.command: "{{ _minikube_cmd }} status --format=json"
+  changed_when: false
+  failed_when: false
+  register: _minikube_status
+  environment: "{{ _minikube_env }}"
+
+- name: Build addons flag
+  ansible.builtin.set_fact:
+    _addons_flag: "{{ minikube_addons | default(['dashboard', 'registry']) | map('regex_replace', '^(.*)$', '--addons=\\1') | join(' ') }}"
+
+- name: Build kubernetes version flag
+  ansible.builtin.set_fact:
+    _k8s_version_flag: "{{ '--kubernetes-version=' ~ minikube_kubernetes_version if minikube_kubernetes_version | default('') | length > 0 else '' }}"
+
+- name: Start minikube cluster
+  ansible.builtin.command: >-
+    {{ _minikube_cmd }} start
+    --cpus={{ minikube_cpus }}
+    --memory={{ minikube_memory }}
+    --driver={{ _resolved_driver }}
+    {{ _addons_flag }}
+    {{ _k8s_version_flag }}
+  environment: "{{ _minikube_env }}"
+  when: _minikube_status.rc != 0 or '"Running"' not in _minikube_status.stdout
+
+- name: Ensure addons are enabled (idempotent)
+  ansible.builtin.command: "{{ _minikube_cmd }} addons enable {{ item }}"
+  loop: "{{ minikube_addons | default(['dashboard', 'registry']) }}"
+  changed_when: true
+  environment: "{{ _minikube_env }}"
+  when: _minikube_status.rc == 0 and '"Running"' in _minikube_status.stdout
+
+- name: Get minikube IP
+  ansible.builtin.command: "{{ _minikube_cmd }} ip"
+  changed_when: false
+  register: _minikube_ip
+  environment: "{{ _minikube_env }}"
+
+- name: Set minikube-specific facts
+  ansible.builtin.set_fact:
+    ko_docker_repo: "{{ _minikube_ip.stdout | trim }}:5000"
+    cluster_ready: true
+    minikube_ip: "{{ _minikube_ip.stdout | trim }}"
+
+- name: Setup CSI hostpath driver
+  when: enable_csi_hostpath | default(false) | bool
+  block:
+    - name: Load loop kernel module inside minikube node
+      ansible.builtin.command: "{{ _minikube_cmd }} ssh -- sudo modprobe loop"
+      environment: "{{ _minikube_env }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure loop devices exist inside minikube node
+      ansible.builtin.shell: |
+        {{ _minikube_cmd }} ssh -- '
+          for i in $(seq 0 7); do
+            [ -e /dev/loop$i ] || sudo mknod -m 0660 /dev/loop$i b 7 $i
+          done
+        '
+      args:
+        executable: /bin/bash
+      environment: "{{ _minikube_env }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Enable csi-hostpath-driver addon
+      ansible.builtin.command: "{{ _minikube_cmd }} addons enable csi-hostpath-driver"
+      environment: "{{ _minikube_env }}"
+      changed_when: true
+
+    - name: Enable volumesnapshots addon
+      ansible.builtin.command: "{{ _minikube_cmd }} addons enable volumesnapshots"
+      environment: "{{ _minikube_env }}"
+      changed_when: true
+
+    - name: Wait for CSI hostpath pods
+      ansible.builtin.command: >-
+        kubectl wait --for=condition=ready pod
+        -l app=csi-hostpathplugin
+        -n kube-system
+        --timeout=120s
+      changed_when: false
+      retries: 6
+      delay: 10
+      register: _csi_wait
+      until: _csi_wait.rc == 0
+
+- name: Deploy NFS Provisioner Operator
+  ansible.builtin.include_tasks: nfs_provisioner.yml
+  when: enable_nfs_provisioner | default(false) | bool
+
+- name: Minikube cluster ready
+  ansible.builtin.debug:
+    msg: "Minikube cluster ready at {{ minikube_ip }} (driver: {{ _resolved_driver }})"

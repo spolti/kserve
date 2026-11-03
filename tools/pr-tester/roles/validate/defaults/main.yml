@@ -1,0 +1,3 @@
+kserve_namespace: kserve
+test_namespace: kserve-pr-test
+run_inference_test: true

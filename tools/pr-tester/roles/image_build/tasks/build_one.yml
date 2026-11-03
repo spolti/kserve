@@ -1,0 +1,58 @@
+---
+- name: "Set build vars for {{ image_key }}"
+  ansible.builtin.set_fact:
+    _img_spec: "{{ _image_build_map[image_key] }}"
+
+- name: "Determine build context for {{ image_key }}"
+  ansible.builtin.set_fact:
+    _build_context: "{{ source_dir }}/{{ _img_spec.context }}"
+    _full_image_tag: "{{ _img_spec.image_name }}:{{ pr_image_tag }}"
+    _build_log: "{{ playbook_dir }}/build-{{ image_key }}.log"
+
+- name: "Starting build: {{ _full_image_tag }}"
+  ansible.builtin.debug:
+    msg: |
+      Building {{ _full_image_tag }}
+        Engine:     {{ engine }}
+        Dockerfile: {{ _img_spec.dockerfile }}
+        Context:    {{ _build_context }}
+        Log:        {{ _build_log }}
+        Follow:     tail -f {{ _build_log }}
+
+- name: "Build image {{ _full_image_tag }}"
+  ansible.builtin.shell: |
+    {{ engine }} build \
+      -f {{ _img_spec.dockerfile }} \
+      -t {{ _full_image_tag }} \
+      --progress=plain \
+      . > {{ _build_log }} 2>&1
+    rc=$?
+    echo "Build exited with code $rc"
+    exit $rc
+  args:
+    chdir: "{{ _build_context }}"
+    executable: /bin/bash
+  timeout: "{{ image_build_timeout }}"
+  register: _build_result
+  failed_when: false
+
+- name: "Read build log for {{ _full_image_tag }}"
+  ansible.builtin.command: tail -80 {{ _build_log }}
+  changed_when: false
+  failed_when: false
+  register: _build_log_tail
+
+- name: "Build output: {{ _full_image_tag }}"
+  ansible.builtin.debug:
+    msg: "{{ _build_log_tail.stdout }}"
+
+- name: "Fail if build failed: {{ _full_image_tag }}"
+  ansible.builtin.fail:
+    msg: |
+      Build FAILED for {{ _full_image_tag }} (exit code {{ _build_result.rc }}).
+      Full log: {{ _build_log }}
+  when: _build_result.rc != 0
+
+- name: "Record built image {{ _full_image_tag }}"
+  ansible.builtin.set_fact:
+    built_images: "{{ built_images + [_full_image_tag] }}"

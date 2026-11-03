@@ -1,0 +1,127 @@
+---
+- name: Check deployed controllers
+  block:
+    - name: Check KServe controller pods
+      ansible.builtin.command: >-
+        kubectl get pods -n {{ kserve_namespace }}
+        -l control-plane=kserve-controller-manager
+        -o jsonpath='{.items[*].status.phase}'
+      changed_when: false
+      register: _controller_status
+      when: "'kserve' in kserve_install_types"
+
+    - name: Validate KServe controller is running
+      ansible.builtin.assert:
+        that:
+          - "'Running' in _controller_status.stdout"
+        fail_msg: "KServe controller is not running. Status: {{ _controller_status.stdout }}"
+      when: "'kserve' in kserve_install_types"
+
+    - name: Check LLMISvc controller pods
+      ansible.builtin.command: >-
+        kubectl get pods -n {{ kserve_namespace }}
+        -l control-plane=llmisvc-controller-manager
+        -o jsonpath='{.items[*].status.phase}'
+      changed_when: false
+      register: _llmisvc_status
+      when: "'llmisvc' in kserve_install_types"
+
+    - name: Validate LLMISvc controller is running
+      ansible.builtin.assert:
+        that:
+          - "'Running' in _llmisvc_status.stdout"
+        fail_msg: "LLMISvc controller is not running. Status: {{ _llmisvc_status.stdout }}"
+      when: "'llmisvc' in kserve_install_types"
+
+    - name: Check LocalModel controller pods
+      ansible.builtin.command: >-
+        kubectl get pods -n {{ kserve_namespace }}
+        -l control-plane=kserve-localmodel-controller-manager
+        -o jsonpath='{.items[*].status.phase}'
+      changed_when: false
+      register: _localmodel_status
+      when: "'localmodel' in kserve_install_types"
+
+    - name: Validate LocalModel controller is running
+      ansible.builtin.assert:
+        that:
+          - "'Running' in _localmodel_status.stdout"
+        fail_msg: "LocalModel controller is not running. Status: {{ _localmodel_status.stdout }}"
+      when: "'localmodel' in kserve_install_types"
+
+- name: Validate InferenceServices
+  when: "'kserve' in kserve_install_types"
+  block:
+    - name: List all InferenceServices in test namespace
+      ansible.builtin.command: >-
+        kubectl get inferenceservice -n {{ test_namespace }}
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+      changed_when: false
+      register: _isvc_status
+      failed_when: false
+
+    - name: Display InferenceService status
+      ansible.builtin.debug:
+        msg: |
+          InferenceServices in {{ test_namespace }}:
+          {{ _isvc_status.stdout | default('(none)') }}
+
+    - name: Get InferenceService URLs
+      ansible.builtin.command: >-
+        kubectl get inferenceservice -n {{ test_namespace }}
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.url}{"\n"}{end}'
+      changed_when: false
+      register: _isvc_urls
+      failed_when: false
+
+- name: Validate LLMInferenceServices
+  when: "'llmisvc' in kserve_install_types"
+  block:
+    - name: List all LLMInferenceServices in test namespace
+      ansible.builtin.command: >-
+        kubectl get llminferenceservice -n {{ test_namespace }}
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+      changed_when: false
+      register: _llmisvc_model_status
+      failed_when: false
+
+    - name: Display LLMInferenceService status
+      ansible.builtin.debug:
+        msg: |
+          LLMInferenceServices in {{ test_namespace }}:
+          {{ _llmisvc_model_status.stdout | default('(none)') }}
+
+- name: Run inference smoke tests
+  ansible.builtin.include_tasks: inference_test.yml
+  loop: "{{ models_to_deploy }}"
+  loop_control:
+    loop_var: model_key
+  when: run_inference_test | bool
+
+- name: Get cluster resource summary
+  ansible.builtin.command: kubectl get all -n {{ test_namespace }}
+  changed_when: false
+  register: _all_resources
+
+- name: Validation summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+        VALIDATION COMPLETE
+      ========================================
+
+      PR #{{ pr_number }} deployed on {{ cluster_type }}
+      Install types: {{ kserve_install_types | join(', ') }}
+      Models deployed: {{ models_to_deploy | join(', ') }}
+      Test namespace: {{ test_namespace }}
+      {% if _isvc_urls is defined and _isvc_urls.stdout | default('') | length > 0 %}
+
+      ISVC Endpoints:
+      {{ _isvc_urls.stdout }}
+      {% endif %}
+
+      The cluster is ready for manual testing.
+
+      To clean up:
+        ansible-playbook cleanup.yml -e pr_number={{ pr_number }}
+      ========================================

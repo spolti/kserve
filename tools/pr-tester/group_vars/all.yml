@@ -1,0 +1,86 @@
+# pr_url is required and must be passed via -e
+# Example: ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1234
+
+# Target cluster: kind, minikube, crc, openshift
+cluster_type: kind
+
+# Container engine: docker, podman, or auto (detect what's available)
+engine: auto
+
+# KServe deployment mode: raw (RawDeployment/standard) or serverless (Knative)
+deployment_mode: raw
+
+# Auto-detect which KServe components the PR touches and configure the
+# pipeline accordingly (images, install types, models). Set to false to
+# use the manual values below instead.
+auto_detect_components: true
+
+# Fallback / manual configuration (used when auto_detect_components=false,
+# or as initial defaults before pr_analyze overrides them)
+images_to_build:
+  - controller
+  - agent
+  - router
+  - storage-initializer
+
+models_to_deploy:
+  - sklearn-iris
+
+# Install types passed to hack/kserve-install.sh --type
+# Auto-set by pr_analyze when auto_detect_components=true
+# Valid values: kserve, llmisvc, localmodel
+kserve_install_types:
+  - kserve
+
+# Sandbox settings
+sandbox_base: /tmp/kserve-pr-sandbox
+
+# Security scan toggle
+skip_security_scan: false
+
+# Copilot review toggle (requires gh CLI + CNCF Copilot access)
+enable_copilot_review: false
+
+# Deploy the canary example InferenceService (sklearn with canary revisions)
+deploy_canary_model: false
+
+# Cluster settings
+destroy_cluster: true
+kind_cluster_name: kserve-pr-test
+kind_registry_port: 5001
+minikube_cpus: 4
+minikube_memory: 8192
+minikube_driver: auto
+
+# Minikube addons to enable
+minikube_addons:
+  - dashboard
+  - registry
+
+# Auto-upgrade minikube to latest GitHub release
+minikube_auto_upgrade: true
+
+# Kubernetes version for minikube (empty = minikube default)
+minikube_kubernetes_version: ""
+
+# CSI Hostpath Driver (minikube addon)
+# Provides dedicated block devices per PVC via the csi-hostpath-sc StorageClass
+enable_csi_hostpath: false
+
+# NFS Provisioner Operator (github.com/Jooho/nfs-provisioner-operator)
+# Deploys an NFS server pod + dynamic "nfs" StorageClass (RWX)
+enable_nfs_provisioner: false
+nfs_provisioner_image: "quay.io/jooholee/nfs-provisioner-operator:0.0.9"
+nfs_storage_size: "10Gi"
+
+# Namespace settings
+kserve_namespace: kserve
+test_namespace: kserve-pr-test
+
+# Timeouts (seconds)
+image_build_timeout: 1800
+deploy_timeout: 600
+isvc_ready_timeout: 300
+
+# Image tag prefix for PR builds
+image_tag_prefix: "pr"

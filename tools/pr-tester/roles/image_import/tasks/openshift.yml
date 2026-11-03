@@ -1,0 +1,31 @@
+---
+- name: Ensure kserve namespace exists for image push
+  ansible.builtin.command: oc get namespace {{ kserve_namespace }}
+  changed_when: false
+  failed_when: false
+  register: _ns_check
+
+- name: Create kserve namespace if missing
+  ansible.builtin.command: oc create namespace {{ kserve_namespace }}
+  when: _ns_check.rc != 0
+
+- name: Login to OpenShift internal registry
+  ansible.builtin.shell: |
+    {{ engine }} login --tls-verify=false \
+      -u $(oc whoami) -p $(oc whoami -t) \
+      {{ openshift_registry }}
+  changed_when: true
+
+- name: Tag and push images to OpenShift registry
+  ansible.builtin.shell: |
+    {{ engine }} tag {{ item }} {{ openshift_registry }}/{{ kserve_namespace }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
+    {{ engine }} push --tls-verify=false {{ openshift_registry }}/{{ kserve_namespace }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
+  loop: "{{ built_images }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Set OpenShift image references
+  ansible.builtin.set_fact:
+    imported_images: >-
+      {{ built_images | map('regex_replace', '^(.+):(.+)$',
+         openshift_registry ~ '/' ~ kserve_namespace ~ '/\1:\2') | list }}

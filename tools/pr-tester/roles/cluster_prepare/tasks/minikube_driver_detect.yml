@@ -1,0 +1,99 @@
+---
+# Detect the correct minikube driver.
+#
+# 1. If an existing minikube profile exists, read its driver to avoid
+#    GUEST_DRIVER_MISMATCH errors.
+# 2. Otherwise auto-detect: prefer docker, fall back to podman.
+# 3. If the user explicitly set a driver (not "auto"), honour it — but warn
+#    if it conflicts with the existing profile.
+#
+# Sets fact: _resolved_driver
+
+- name: Read driver from existing minikube profile
+  ansible.builtin.shell: |
+    set -o pipefail
+    "{{ _minikube_cmd }}" profile list -o json 2>/dev/null \
+      | grep -o '"Driver":"[^"]*"' \
+      | head -1 \
+      | cut -d'"' -f4
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+  register: _profile_driver_result
+  environment: "{{ _minikube_env }}"
+
+- name: Set existing driver fact
+  ansible.builtin.set_fact:
+    _existing_driver: "{{ _profile_driver_result.stdout | default('') | trim }}"
+
+- name: Check for docker availability
+  ansible.builtin.command: docker info
+  changed_when: false
+  failed_when: false
+  register: _docker_check
+  when: _existing_driver | length == 0
+
+- name: Check for podman availability
+  ansible.builtin.command: podman info
+  changed_when: false
+  failed_when: false
+  register: _podman_check
+  when: _existing_driver | length == 0
+
+- name: Resolve driver — existing profile found, user said auto
+  ansible.builtin.set_fact:
+    _resolved_driver: "{{ _existing_driver }}"
+    _driver_source: "existing profile"
+  when:
+    - _existing_driver | length > 0
+    - minikube_driver == 'auto'
+
+- name: Resolve driver — user explicitly chose and no conflict
+  ansible.builtin.set_fact:
+    _resolved_driver: "{{ minikube_driver }}"
+    _driver_source: "user-specified"
+  when:
+    - minikube_driver != 'auto'
+    - _existing_driver | length == 0 or _existing_driver == minikube_driver
+
+- name: Resolve driver — user choice conflicts with existing profile
+  when:
+    - minikube_driver != 'auto'
+    - _existing_driver | length > 0
+    - _existing_driver != minikube_driver
+  block:
+    - name: Display driver mismatch warning
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Existing minikube cluster uses driver '{{ _existing_driver }}'
+                   but '{{ minikube_driver }}' was requested.
+                   Using '{{ _existing_driver }}' to avoid GUEST_DRIVER_MISMATCH.
+                   To switch drivers, delete the cluster first:
+                     {{ _minikube_cmd }} delete
+
+    - name: Use existing driver
+      ansible.builtin.set_fact:
+        _resolved_driver: "{{ _existing_driver }}"
+        _driver_source: "existing profile (overrode '{{ minikube_driver }}')"
+
+- name: Resolve driver — auto-detect (no existing profile)
+  ansible.builtin.set_fact:
+    _resolved_driver: "{{ 'docker' if (_docker_check.rc | default(1)) == 0 else 'podman' if (_podman_check.rc | default(1)) == 0 else 'docker' }}"
+    _driver_source: "auto-detected"
+  when: _resolved_driver is not defined
+
+- name: Fail if no container engine found
+  ansible.builtin.fail:
+    msg: |
+      No container engine found. Install docker or podman first.
+      On macOS:  brew install --cask docker   OR   brew install podman
+      On Linux:  sudo dnf install -y podman    OR   install Docker Engine
+  when:
+    - _existing_driver | length == 0
+    - (_docker_check.rc | default(1)) != 0
+    - (_podman_check.rc | default(1)) != 0
+
+- name: Display resolved driver
+  ansible.builtin.debug:
+    msg: "Minikube driver: {{ _resolved_driver }} ({{ _driver_source }})"

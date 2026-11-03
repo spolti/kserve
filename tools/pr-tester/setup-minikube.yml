@@ -1,0 +1,327 @@
+---
+# Standalone Minikube Setup
+#
+# Installs/upgrades minikube to the latest release, starts a cluster with
+# dashboard and registry addons, and optionally deploys the NFS Provisioner
+# Operator for dynamic RWX storage.
+#
+# Minikube is installed into ./bin/ (no sudo required).
+# The container driver is auto-detected (docker or podman) unless explicitly
+# set with -e minikube_driver=docker|podman.  If an existing minikube profile
+# exists, its driver is reused to avoid GUEST_DRIVER_MISMATCH errors.
+#
+# Usage:
+#   ansible-playbook setup-minikube.yml
+#   ansible-playbook setup-minikube.yml -e minikube_cpus=6 -e minikube_memory=16384
+#   ansible-playbook setup-minikube.yml -e minikube_driver=podman
+#   ansible-playbook setup-minikube.yml -e enable_nfs_provisioner=false
+#
+- name: Setup Minikube
+  hosts: localhost
+  gather_facts: true
+
+  vars:
+    enable_nfs_provisioner: false
+    enable_csi_hostpath: false
+
+  pre_tasks:
+    - name: Display configuration
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            Minikube Setup Configuration
+          ========================================
+          CPUs:            {{ minikube_cpus }}
+          Memory:          {{ minikube_memory }}MB
+          Driver:          {{ minikube_driver }} {{ '(will auto-detect)' if minikube_driver == 'auto' else '' }}
+          Addons:          {{ minikube_addons | join(', ') }}
+          K8s version:     {{ minikube_kubernetes_version | default('latest', true) }}
+          Auto-upgrade:    {{ minikube_auto_upgrade }}
+          CSI Hostpath:    {{ 'enabled' if enable_csi_hostpath | bool else 'disabled' }}
+          NFS Provisioner: {{ 'enabled' if enable_nfs_provisioner | bool else 'disabled' }}
+          Install path:    {{ playbook_dir }}/bin/
+          ========================================
+
+  tasks:
+    # -- Install / upgrade minikube --
+    - name: Install or upgrade minikube
+      ansible.builtin.include_tasks: roles/cluster_prepare/tasks/minikube_install.yml
+
+    - name: Set minikube command path
+      ansible.builtin.set_fact:
+        _minikube_cmd: "{{ _local_bin }}/minikube"
+        _minikube_env:
+          PATH: "{{ _local_bin }}:{{ lookup('env', 'PATH') }}"
+
+    # -- Detect driver --
+    - name: Detect container driver
+      ansible.builtin.include_tasks: roles/cluster_prepare/tasks/minikube_driver_detect.yml
+
+    # -- Start cluster --
+    - name: Check minikube status
+      ansible.builtin.command: "{{ _minikube_cmd }} status --format=json"
+      changed_when: false
+      failed_when: false
+      register: _minikube_status
+      environment: "{{ _minikube_env }}"
+
+    - name: Build addons flag
+      ansible.builtin.set_fact:
+        _addons_flag: "{{ minikube_addons | map('regex_replace', '^(.*)$', '--addons=\\1') | join(' ') }}"
+
+    - name: Build kubernetes version flag
+      ansible.builtin.set_fact:
+        _k8s_version_flag: "{{ '--kubernetes-version=' ~ minikube_kubernetes_version if minikube_kubernetes_version | default('') | length > 0 else '' }}"
+
+    - name: Start minikube cluster
+      ansible.builtin.command: >-
+        {{ _minikube_cmd }} start
+        --cpus={{ minikube_cpus }}
+        --memory={{ minikube_memory }}
+        --driver={{ _resolved_driver }}
+        {{ _addons_flag }}
+        {{ _k8s_version_flag }}
+      environment: "{{ _minikube_env }}"
+      when: _minikube_status.rc != 0 or '"Running"' not in _minikube_status.stdout
+
+    - name: Ensure addons are enabled
+      ansible.builtin.command: "{{ _minikube_cmd }} addons enable {{ item }}"
+      loop: "{{ minikube_addons }}"
+      changed_when: true
+      environment: "{{ _minikube_env }}"
+      when: _minikube_status.rc == 0 and '"Running"' in _minikube_status.stdout
+
+    # -- Wait for dashboard --
+    - name: Wait for dashboard deployment
+      ansible.builtin.command: >-
+        kubectl rollout status deployment/kubernetes-dashboard-web
+        -n kubernetes-dashboard
+        --timeout=120s
+      changed_when: false
+      failed_when: false
+
+    # -- CSI Hostpath Driver --
+    - name: Enable CSI hostpath driver addon
+      when: enable_csi_hostpath | bool
+      block:
+        - name: Load loop kernel module inside minikube node
+          ansible.builtin.command: "{{ _minikube_cmd }} ssh -- sudo modprobe loop"
+          environment: "{{ _minikube_env }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Ensure loop devices exist inside minikube node
+          ansible.builtin.shell: |
+            {{ _minikube_cmd }} ssh -- '
+              for i in $(seq 0 7); do
+                [ -e /dev/loop$i ] || sudo mknod -m 0660 /dev/loop$i b 7 $i
+              done
+              ls -la /dev/loop*
+            '
+          args:
+            executable: /bin/bash
+          environment: "{{ _minikube_env }}"
+          changed_when: false
+          failed_when: false
+          register: _loop_devices
+
+        - name: Display loop devices
+          ansible.builtin.debug:
+            msg: "Loop devices inside minikube:\n{{ _loop_devices.stdout }}"
+
+        - name: Enable csi-hostpath-driver addon
+          ansible.builtin.command: "{{ _minikube_cmd }} addons enable csi-hostpath-driver"
+          environment: "{{ _minikube_env }}"
+          changed_when: true
+
+        - name: Enable volumesnapshots addon
+          ansible.builtin.command: "{{ _minikube_cmd }} addons enable volumesnapshots"
+          environment: "{{ _minikube_env }}"
+          changed_when: true
+
+        - name: Wait for CSI hostpath pods
+          ansible.builtin.command: >-
+            kubectl wait --for=condition=ready pod
+            -l app=csi-hostpathplugin
+            -n kube-system
+            --timeout=120s
+          changed_when: false
+          retries: 6
+          delay: 10
+          register: _csi_wait
+          until: _csi_wait.rc == 0
+
+        - name: Verify csi-hostpath-sc StorageClass exists
+          ansible.builtin.command: kubectl get storageclass csi-hostpath-sc
+          changed_when: false
+          register: _csi_sc
+          retries: 3
+          delay: 5
+          until: _csi_sc.rc == 0
+
+        - name: Verify block volume support with a test PVC
+          block:
+            - name: Create test block PVC
+              ansible.builtin.command:
+                cmd: kubectl apply -f -
+                stdin: |
+                  apiVersion: v1
+                  kind: PersistentVolumeClaim
+                  metadata:
+                    name: csi-block-test
+                    namespace: default
+                  spec:
+                    accessModes: ["ReadWriteOnce"]
+                    volumeMode: Block
+                    storageClassName: csi-hostpath-sc
+                    resources:
+                      requests:
+                        storage: 64Mi
+
+            - name: Wait for test PVC to bind
+              ansible.builtin.command: >-
+                kubectl wait --for=jsonpath='{.status.phase}'=Bound
+                pvc/csi-block-test -n default --timeout=60s
+              changed_when: false
+              register: _pvc_bind
+
+            - name: Block volume provisioning verified
+              ansible.builtin.debug:
+                msg: "CSI hostpath block volume provisioning is working."
+
+          always:
+            - name: Delete test PVC
+              ansible.builtin.command: kubectl delete pvc csi-block-test -n default --ignore-not-found
+              failed_when: false
+              changed_when: false
+
+    # -- NFS Provisioner --
+    - name: Deploy NFS Provisioner Operator
+      ansible.builtin.include_tasks: roles/cluster_prepare/tasks/nfs_provisioner.yml
+      when: enable_nfs_provisioner | bool
+
+    # -- Gather cluster info --
+    - name: Get minikube IP
+      ansible.builtin.command: "{{ _minikube_cmd }} ip"
+      changed_when: false
+      register: _minikube_ip
+      environment: "{{ _minikube_env }}"
+
+    - name: Get minikube profile info
+      ansible.builtin.command: "{{ _minikube_cmd }} profile list -o json"
+      changed_when: false
+      failed_when: false
+      register: _minikube_profile_info
+      environment: "{{ _minikube_env }}"
+
+    - name: Get dashboard service URL
+      ansible.builtin.shell: |
+        {{ _minikube_cmd }} service kubernetes-dashboard-web \
+          -n kubernetes-dashboard --url 2>/dev/null &
+        PID=$!
+        sleep 3
+        kill $PID 2>/dev/null || true
+        wait $PID 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      register: _dashboard_url
+      environment: "{{ _minikube_env }}"
+
+    - name: Get current kubectl context
+      ansible.builtin.command: kubectl config current-context
+      changed_when: false
+      failed_when: false
+      register: _current_context
+
+    - name: Get cluster info
+      ansible.builtin.command: kubectl cluster-info
+      changed_when: false
+      register: _cluster_info
+
+    - name: Get Kubernetes server version
+      ansible.builtin.command: kubectl version --short
+      changed_when: false
+      failed_when: false
+      register: _k8s_version
+
+    - name: Get storage classes
+      ansible.builtin.command: kubectl get storageclass
+      changed_when: false
+      register: _storage_classes
+
+    - name: Get node info
+      ansible.builtin.command: kubectl get nodes -o wide
+      changed_when: false
+      register: _node_info
+
+    # -- Summary --
+    - name: Setup complete
+      ansible.builtin.debug:
+        msg: |
+          ========================================
+            Minikube Setup Complete
+          ========================================
+
+          Minikube binary: {{ _local_bin }}/minikube
+          Driver:          {{ _resolved_driver }}
+          Cluster IP:      {{ _minikube_ip.stdout | trim }}
+          Registry:        {{ _minikube_ip.stdout | trim }}:5000
+          {% if _k8s_version.stdout is defined and _k8s_version.stdout | length > 0 %}
+          {{ _k8s_version.stdout | trim }}
+          {% endif %}
+
+          Nodes:
+          {{ _node_info.stdout }}
+
+          {{ _cluster_info.stdout }}
+
+          Storage Classes:
+          {{ _storage_classes.stdout }}
+          {% if enable_csi_hostpath | bool %}
+
+          CSI Hostpath Driver enabled.
+          Use --storage-class csi-hostpath-sc --volume-mode block for dedicated block devices per PVC.
+          {% endif %}
+          {% if enable_nfs_provisioner | bool %}
+
+          NFS StorageClass "nfs" is available for RWX PVCs.
+          {% endif %}
+
+          ----------------------------------------
+            Dashboard
+          ----------------------------------------
+          {% if _dashboard_url.stdout is defined and _dashboard_url.stdout | trim | length > 0 %}
+          URL: {{ _dashboard_url.stdout | trim }}
+          {% endif %}
+          Start the dashboard (opens browser):
+            {{ _minikube_cmd }} dashboard
+
+          Get the dashboard URL only (no browser):
+            {{ _minikube_cmd }} dashboard --url
+
+          ----------------------------------------
+            kubectl Context
+          ----------------------------------------
+          Current context: {{ _current_context.stdout | default('unknown') | trim }}
+
+          Switch to this cluster:
+            kubectl config use-context minikube
+
+          Verify connection:
+            kubectl cluster-info
+            kubectl get nodes
+
+          ----------------------------------------
+            Next Steps
+          ----------------------------------------
+          Deploy a PR for testing:
+            ./pr-test.sh deploy <PR_URL> --cluster minikube
+
+          Or use ansible-playbook directly:
+            ansible-playbook deploy-pr.yml \
+              -e pr_url=<PR_URL> \
+              -e cluster_type=minikube
+
+          ========================================

@@ -1,0 +1,40 @@
+---
+- name: Skip security scan if requested
+  ansible.builtin.debug:
+    msg: "Security scan skipped (skip_security_scan=true)"
+  when: skip_security_scan | bool
+
+- name: Run security scan
+  when: not (skip_security_scan | bool)
+  block:
+    - name: Locate security scan script
+      ansible.builtin.set_fact:
+        _scan_script: "{{ playbook_dir }}/scripts/security-scan.sh"
+
+    - name: Ensure scan script is executable
+      ansible.builtin.file:
+        path: "{{ _scan_script }}"
+        mode: "0755"
+
+    - name: Execute security scan on PR diff
+      ansible.builtin.command:
+        cmd: "{{ _scan_script }} {{ source_dir }} origin/{{ pr_base_branch }}"
+      register: _scan_result
+      failed_when: false
+      changed_when: false
+
+    - name: Display scan output
+      ansible.builtin.debug:
+        msg: "{{ _scan_result.stdout }}"
+
+    - name: Fail on security findings
+      ansible.builtin.fail:
+        msg: |
+          Security scan detected suspicious patterns in PR #{{ pr_number }}.
+          Review the findings above. To override, re-run with: -e skip_security_scan=true
+      when: _scan_result.rc != 0
+
+    - name: Security scan passed
+      ansible.builtin.debug:
+        msg: "Security scan passed for PR #{{ pr_number }}"
+      when: _scan_result.rc == 0
