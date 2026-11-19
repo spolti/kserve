@@ -8,6 +8,7 @@
 # Examples:
 #   ./pr-test.sh deploy https://github.com/kserve/kserve/pull/1234
 #   ./pr-test.sh deploy https://github.com/kserve/kserve/pull/1234 --cluster minikube --engine podman
+#   ./pr-test.sh deploy https://gitlab.com/group/kserve/-/merge_requests/42 --ssrf-tests
 #   ./pr-test.sh cleanup 1234
 #   ./pr-test.sh cleanup 1234 --keep-cluster
 
@@ -57,6 +58,10 @@ Usage:
   $(basename "$0") deploy <PR_URL> [OPTIONS]
   $(basename "$0") cleanup <PR_NUMBER> [OPTIONS]
   $(basename "$0") setup-minikube [OPTIONS]
+
+PR_URL is a GitHub pull request (https://github.com/OWNER/REPO/pull/N) or a
+GitLab merge request (https://HOST/GROUP/PROJECT/-/merge_requests/N). Set
+GITLAB_TOKEN for private GitLab projects. PR_NUMBER is the PR or MR number.
   $(basename "$0") cleanup-minikube [OPTIONS]
   $(basename "$0") deploy-transformer [OPTIONS]
   $(basename "$0") cleanup-transformer
@@ -77,7 +82,10 @@ Deploy options:
   --copilot           Post a @copilot review comment on the GitHub PR (not local)
   --no-auto-detect    Disable auto-detection, use manual images/models config
   --canary            Deploy the canary example InferenceService (sklearn with canary revisions)
-  --models LIST       Comma-separated models: sklearn-iris,xgboost-iris,lightgbm-iris,sklearn-canary,llmisvc-opt-125m
+  --ssrf-tests        Run the HTTP(S) storageUri SSRF admission and storage-initializer checks
+  --models LIST       Comma-separated models: sklearn-iris,xgboost-iris,lightgbm-iris,sklearn-canary,sklearn-mms,llmisvc-opt-125m
+                      (sklearn-mms: multi-model ISVC whose TrainedModels load through the agent puller;
+                       override them with -e '{"mms_trained_models": [...]}' when calling ansible-playbook)
 
 Cleanup options:
   --cluster TYPE      Target cluster type (default: kind)
@@ -104,6 +112,7 @@ Deploy-transformer options:
 Examples:
   $(basename "$0") deploy https://github.com/kserve/kserve/pull/1234
   $(basename "$0") deploy https://github.com/kserve/kserve/pull/5678 --cluster minikube --models sklearn-iris,xgboost-iris
+  $(basename "$0") deploy https://gitlab.com/group/kserve/-/merge_requests/42 --cluster minikube --ssrf-tests
   $(basename "$0") cleanup 1234
   $(basename "$0") cleanup 1234 --keep-cluster
   $(basename "$0") setup-minikube
@@ -139,6 +148,8 @@ cmd_deploy() {
                 extra_args+=(-e "auto_detect_components=false"); shift ;;
             --canary)
                 extra_args+=(-e "deploy_canary_model=true"); shift ;;
+            --ssrf-tests)
+                extra_args+=(-e "run_ssrf_tests=true"); shift ;;
             --models)
                 local models_json
                 models_json=$(echo "$2" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip().split(',')))")

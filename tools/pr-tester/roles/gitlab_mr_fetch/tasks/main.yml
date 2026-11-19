@@ -1,0 +1,169 @@
+---
+# Fetches a GitLab merge request into an isolated sandbox clone.
+# Read-only against GitLab: it never comments on, approves or pushes to the MR.
+
+- name: Parse GitLab merge request URL
+  ansible.builtin.set_fact:
+    _mr_match: "{{ pr_url | regex_search('^https://([^/]+)/(.+?)/-/merge_requests/([0-9]+)', '\\1', '\\2', '\\3') }}"
+
+- name: Validate parsed merge request URL
+  ansible.builtin.assert:
+    that:
+      - _mr_match | length == 3
+    fail_msg: "Invalid GitLab MR URL: {{ pr_url }}. Expected https://HOST/GROUP/PROJECT/-/merge_requests/NUMBER"
+
+- name: Set merge request metadata facts
+  ansible.builtin.set_fact:
+    gitlab_host: "{{ _mr_match[0] }}"
+    gitlab_project_path: "{{ _mr_match[1] }}"
+    pr_owner: "{{ _mr_match[1] | dirname }}"
+    pr_repo: "{{ _mr_match[1] | basename }}"
+    pr_number: "{{ _mr_match[2] }}"
+    pr_timestamp: "{{ ansible_facts['date_time']['epoch'] }}"
+    _gitlab_api: "https://{{ _mr_match[0] }}/api/v4/projects/{{ _mr_match[1] | urlencode | replace('/', '%2F') }}"
+
+# curl instead of ansible.builtin.uri: it uses the system trust store (the
+# macOS keychain, /etc/pki on Fedora/RHEL), like git does, so internal
+# corporate CAs work without extra setup. The token goes through stdin
+# (-H @-) so it never appears in the process list.
+- name: Get merge request details from GitLab API
+  ansible.builtin.command:
+    argv: >-
+      {{ ['curl', '--silent', '--show-error', '--fail', '--max-time', '30', '-H', '@-']
+         + (['--insecure'] if not (gitlab_validate_certs | bool) else [])
+         + (['--cacert', gitlab_ca_path] if gitlab_ca_path | length > 0 else [])
+         + [_gitlab_api ~ '/merge_requests/' ~ pr_number] }}
+    stdin: "{{ ('PRIVATE-TOKEN: ' ~ gitlab_token) if gitlab_token | length > 0 else '' }}"
+  register: _mr_api_raw
+  changed_when: false
+  no_log: "{{ gitlab_token | length > 0 }}"
+
+- name: Parse merge request details
+  ansible.builtin.set_fact:
+    _mr_api: "{{ _mr_api_raw.stdout | from_json }}"
+
+- name: Set merge request facts
+  ansible.builtin.set_fact:
+    pr_base_branch: "{{ _mr_api.target_branch }}"
+    pr_head_sha: "{{ _mr_api.sha }}"
+    pr_title: "{{ _mr_api.title }}"
+    pr_web_url: "{{ _mr_api.web_url }}"
+    _mr_state: "{{ _mr_api.state }}"
+    _mr_cross_project: "{{ _mr_api.source_project_id != _mr_api.target_project_id }}"
+    sandbox_dir: "{{ sandbox_base }}/mr-{{ pr_number }}-{{ pr_timestamp }}"
+    pr_image_tag: "{{ mr_image_tag_prefix }}-{{ pr_number }}"
+
+- name: Warn when the merge request is not open
+  ansible.builtin.debug:
+    msg: "WARNING: MR !{{ pr_number }} is '{{ _mr_state }}', testing its last head {{ pr_head_sha[:12] }} anyway."
+  when: _mr_state != 'opened'
+
+- name: Display merge request info
+  ansible.builtin.debug:
+    msg: |
+      MR !{{ pr_number }} from {{ gitlab_project_path }} on {{ gitlab_host }}
+      Title:     {{ pr_title }}
+      Target:    {{ pr_base_branch }}
+      Head SHA:  {{ pr_head_sha }}
+      Fork MR:   {{ _mr_cross_project }}
+      Sandbox:   {{ sandbox_dir }}
+      Image tag: {{ pr_image_tag }}
+
+# Pass the token as a transient git config entry so it never lands in
+# .git/config, the process list or the Ansible log.
+- name: Build git environment
+  ansible.builtin.set_fact:
+    _git_env: >-
+      {{ {
+           'GIT_TERMINAL_PROMPT': '0',
+           'GIT_CONFIG_COUNT': '1',
+           'GIT_CONFIG_KEY_0': 'http.https://' ~ gitlab_host ~ '/.extraHeader',
+           'GIT_CONFIG_VALUE_0': 'Authorization: Basic ' ~ ('oauth2:' ~ gitlab_token) | b64encode
+         } if gitlab_token | length > 0 else {'GIT_TERMINAL_PROMPT': '0'} }}
+    _git_ssl_env: "{{ {'GIT_SSL_NO_VERIFY': 'true'} if not (gitlab_validate_certs | bool) else ({'GIT_SSL_CAINFO': gitlab_ca_path} if gitlab_ca_path | length > 0 else {}) }}"
+  no_log: true
+
+- name: Create sandbox directory
+  ansible.builtin.file:
+    path: "{{ sandbox_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Set source directory fact
+  ansible.builtin.set_fact:
+    source_dir: "{{ sandbox_dir }}/{{ pr_repo }}"
+
+- name: Clone target branch into sandbox
+  ansible.builtin.command:
+    cmd: >-
+      git clone --depth={{ gitlab_fetch_depth }} --single-branch
+      --branch {{ pr_base_branch }}
+      https://{{ gitlab_host }}/{{ gitlab_project_path }}.git
+      {{ source_dir }}
+  args:
+    creates: "{{ source_dir }}/.git"
+  environment: "{{ _git_env | combine(_git_ssl_env) }}"
+
+# GitLab publishes every MR head, including MRs from forks, on the target
+# project as refs/merge-requests/<N>/head.
+- name: Fetch merge request head
+  ansible.builtin.command:
+    cmd: >-
+      git fetch --depth={{ gitlab_fetch_depth }} origin
+      +refs/merge-requests/{{ pr_number }}/head:refs/remotes/origin/merge-requests/{{ pr_number }}
+  args:
+    chdir: "{{ source_dir }}"
+  environment: "{{ _git_env | combine(_git_ssl_env) }}"
+  changed_when: true
+
+- name: Check out merge request head
+  ansible.builtin.command:
+    cmd: git checkout -B mr-{{ pr_number }} refs/remotes/origin/merge-requests/{{ pr_number }}
+  args:
+    chdir: "{{ source_dir }}"
+  changed_when: true
+
+- name: Get checked out commit
+  ansible.builtin.command:
+    cmd: git rev-parse HEAD
+  args:
+    chdir: "{{ source_dir }}"
+  register: _mr_checked_out
+  changed_when: false
+
+- name: Warn when the merge request moved after the API call
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: API reported head {{ pr_head_sha[:12] }} but the fetched ref is
+      {{ _mr_checked_out.stdout[:12] }}. The MR was probably updated; testing the fetched commit.
+  when: _mr_checked_out.stdout | trim != pr_head_sha
+
+- name: Record tested commit
+  ansible.builtin.set_fact:
+    pr_head_sha: "{{ _mr_checked_out.stdout | trim }}"
+
+# pr_analyze diffs origin/<target>...HEAD, which needs the merge base.
+- name: Check merge base is reachable
+  ansible.builtin.command:
+    cmd: git merge-base origin/{{ pr_base_branch }} HEAD
+  args:
+    chdir: "{{ source_dir }}"
+  register: _mr_merge_base
+  changed_when: false
+  failed_when: false
+
+- name: Deepen history until the merge base is reachable
+  ansible.builtin.command:
+    cmd: >-
+      git fetch --unshallow origin
+      +refs/heads/{{ pr_base_branch }}:refs/remotes/origin/{{ pr_base_branch }}
+      +refs/merge-requests/{{ pr_number }}/head:refs/remotes/origin/merge-requests/{{ pr_number }}
+  args:
+    chdir: "{{ source_dir }}"
+  environment: "{{ _git_env | combine(_git_ssl_env) }}"
+  changed_when: true
+  when: _mr_merge_base.rc != 0
+
+- name: MR fetch complete
+  ansible.builtin.debug:
+    msg: "MR !{{ pr_number }} ({{ pr_head_sha[:12] }}) checked out at {{ source_dir }} (base: {{ pr_base_branch }})"

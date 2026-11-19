@@ -7,7 +7,7 @@
   ansible.builtin.assert:
     that:
       - _cleanup_pr | length > 0
-    fail_msg: "pr_number must be set. Pass it with -e pr_number=1234"
+    fail_msg: "pr_number must be set (GitHub PR or GitLab MR number). Pass it with -e pr_number=1234"
 
 - name: Delete test InferenceServices
   ansible.builtin.command: >-
@@ -39,7 +39,9 @@
 - name: Find and remove sandbox directory
   ansible.builtin.find:
     paths: "{{ sandbox_base }}"
-    patterns: "pr-{{ _cleanup_pr }}-*"
+    patterns:
+      - "pr-{{ _cleanup_pr }}-*"
+      - "mr-{{ _cleanup_pr }}-*"
     file_type: directory
   register: _sandbox_dirs
 

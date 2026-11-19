@@ -96,6 +96,21 @@ Or directly with ansible-playbook:
 ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1234
 ```
 
+`PR_URL` can also be a GitLab merge request. The source is detected from the URL:
+
+| URL | Source |
+|-----|--------|
+| `https://github.com/OWNER/REPO/pull/N` | GitHub pull request (needs the `gh` CLI) |
+| `https://HOST/GROUP[/SUBGROUP...]/PROJECT/-/merge_requests/N` | GitLab merge request (any GitLab host) |
+
+```bash
+./pr-test.sh deploy https://gitlab.com/GROUP/PROJECT/-/merge_requests/42 --cluster minikube
+```
+
+GitLab access is anonymous by default. For private projects, export `GITLAB_TOKEN` (a personal or project access token with `read_api` and `read_repository`). The token is passed to `curl` and `git` without appearing in the process list, `.git/config` or the Ansible log. Both tools use the system trust store; if the GitLab CA is not in it, pass `-e gitlab_ca_path=/path/to/ca.pem`.
+
+The GitLab path is read-only: it never comments on, approves or pushes to the MR. `--copilot` applies to GitHub only.
+
 ### Options
 
 | Option | ansible-playbook flag | Default | Description |
@@ -106,7 +121,8 @@ ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1
 | `--skip-scan` | `-e skip_security_scan=true` | `false` | Skip security scan of PR diff |
 | `--copilot` | `-e enable_copilot_review=true` | `false` | Post a `@copilot` review request comment on the GitHub PR (requires Copilot code review enabled on the repo) |
 | `--canary` | `-e deploy_canary_model=true` | `false` | Deploy the canary example InferenceService (sklearn with multiple canary revisions) |
-| `--models LIST` | `-e 'models_to_deploy=[...]'` | `sklearn-iris` | Models to deploy |
+| `--models LIST` | `-e '{"models_to_deploy": [...]}'` | `sklearn-iris` | Models to deploy |
+| `--ssrf-tests` | `-e run_ssrf_tests=true` | `false` | Run the HTTP(S) storageUri SSRF checks (see [SSRF checks](#ssrf-checks)) |
 
 ### Examples
 
@@ -143,7 +159,16 @@ PR URL
 
 ### 1. PR Fetch
 
-Parses the PR URL, creates an isolated sandbox, clones the repo, and checks out the PR branch.
+Parses the PR URL, creates an isolated sandbox, clones the repo, and checks out the PR branch. `pr_fetch` detects the source from the URL and either runs its GitHub tasks or hands off to the `gitlab_mr_fetch` role.
+
+**GitLab merge requests** (`gitlab_mr_fetch`):
+
+- Reads the target branch, head SHA and state from the GitLab API
+- Clones the target branch into `/tmp/kserve-pr-sandbox/mr-<NUMBER>-<TIMESTAMP>/` and checks out `refs/merge-requests/<NUMBER>/head`, which also covers MRs from forks
+- Warns when the MR is not open or moved after the API call, and deepens the shallow clone when the merge base is not reachable
+- Tags images `mr-<NUMBER>`
+
+**GitHub pull requests:**
 
 - Validates the URL format (`https://github.com/OWNER/REPO/pull/NUMBER`)
 - Verifies the `gh` CLI is installed and authenticated
@@ -152,7 +177,7 @@ Parses the PR URL, creates an isolated sandbox, clones the repo, and checks out 
 - Resolves the base branch (e.g. `master` or `main`) and fetches it for diff comparison
 - Optionally posts a `@copilot review this PR for security and correctness` comment on the GitHub PR via `gh pr review --comment` (if `--copilot` is passed). This triggers GitHub Copilot's asynchronous code review on the remote PR — it is **not** a local review. Requires the repository to have GitHub Copilot code review enabled.
 
-**Produces:** `source_dir`, `pr_number`, `pr_base_branch`, `pr_image_tag`
+**Produces:** `pr_source` (`github` or `gitlab`), `source_dir`, `pr_number`, `pr_base_branch`, `pr_image_tag`; GitLab also sets `pr_head_sha`, `pr_title`, `pr_web_url`
 
 ### 2. PR Analyze
 
@@ -217,7 +242,9 @@ Installs KServe controllers and dependencies into the cluster.
 - For Kind with all components: uses `make deploy-dev` for a full development deployment
 - Otherwise: uses `hack/kserve-install.sh --type <types>` to install only the needed controllers
 - Installs infrastructure dependencies based on detected components (cert-manager for core, Gateway API + LWS + Envoy Gateway for LLMISvc)
-- On OpenShift/CRC: patches controller deployments to use the PR-built images
+- Patches controller deployments to use the PR-built images
+- Points the agent, router and storage-initializer entries in `inferenceservice-config`, and the `default` ClusterStorageContainer, at the PR-built images. The controller reads these images from there, not from environment variables. The ClusterStorageContainer decides the storage-initializer image for `gs://`, `s3://`, `hf://` and `http(s)://` URIs.
+- Prints the effective sidecar and storage-initializer images
 - Waits for each controller pod to reach Ready state
 
 ### 8. Models Deploy
@@ -229,6 +256,30 @@ Creates test workloads to verify the deployed KServe controllers are functioning
 - Uses `InferenceService` for core KServe models (sklearn, xgboost, lightgbm)
 - Uses `LLMInferenceService` for LLM models (opt-125m)
 - Waits for each resource to reach `Ready` condition (timeout: `isvc_ready_timeout`, default 5 minutes)
+- For multi-model InferenceServices (`sklearn-mms`), then deploys their `TrainedModel`s and waits until the predictor reports each one ready
+
+#### Reusable TrainedModel task
+
+`roles/models_deploy/tasks/deploy_trained_model.yml` deploys one TrainedModel and can be called from any role or play:
+
+```yaml
+- ansible.builtin.include_role:
+    name: models_deploy
+    tasks_from: deploy_trained_model.yml
+  vars:
+    trained_model:
+      name: my-model            # required
+      isvc: sklearn-mms         # required, a multi-model InferenceService
+      storage_uri: gs://...     # required
+      framework: sklearn        # default sklearn
+      memory: 128Mi             # default 128Mi
+      labels: {team: x}         # extra labels
+      wait: true                # wait until the predictor reports it ready
+      dry_run: false            # server-side dry run (admission only)
+      allow_failure: false      # record the outcome instead of failing
+```
+
+It sets `trained_model_result` (`applied`, `ready`, `rc`, `stderr`, `status`). Readiness is read from the predictor's `/v1/models/<name>` endpoint through the API server's service proxy, so no port-forward is needed (raw deployment mode).
 
 ### 9. Validate
 
@@ -237,6 +288,7 @@ Post-deployment verification and summary.
 - Checks controller pod health for each installed component
 - Lists InferenceService and/or LLMInferenceService resources and their status
 - Optionally runs inference smoke tests (port-forward + HTTP POST to prediction endpoint)
+- Optionally runs the [SSRF checks](#ssrf-checks) (`--ssrf-tests`)
 - Prints a summary with resource status and cleanup instructions
 
 ## Auto-detection
@@ -255,7 +307,7 @@ When `auto_detect_components` is `true` (the default), the `pr_analyze` role sca
 | `python/sklearnserver` | runtime_sklearn | KServe controller | controller, sklearn, storage-init | sklearn-iris ISVC |
 | `python/xgbserver` | runtime_xgboost | KServe controller | controller, xgboost, storage-init | xgboost-iris ISVC |
 | `python/huggingfaceserver` | runtime_huggingface | KServe controller | controller, huggingface-cpu, storage-init | sklearn-iris ISVC |
-| `cmd/agent`, `pkg/agent` | agent | KServe controller | controller, agent, storage-init | sklearn-iris ISVC |
+| `cmd/agent`, `pkg/agent` | agent | KServe controller | controller, agent, storage-init | sklearn-iris ISVC, sklearn-mms ISVC + TrainedModels |
 | `python/kserve/` (SDK) | python_sdk | KServe controller | controller, storage-init | sklearn-iris ISVC |
 
 PRs touching multiple components (e.g. both core ISVC and LLMISvc code) will install the union of all required infrastructure.
@@ -278,6 +330,35 @@ Predefined models that the playbook deploys to validate that KServe is working a
 | `xgboost-iris` | InferenceService | XGBoost | `gs://kfserving-examples/models/xgboost/iris` | v1 |
 | `lightgbm-iris` | InferenceService | LightGBM | `gs://kfserving-examples/models/lgb/iris` | v1 |
 | `llmisvc-opt-125m` | LLMInferenceService | vLLM (CPU) | `hf://facebook/opt-125m` | OpenAI-compatible |
+| `sklearn-mms` | InferenceService + TrainedModels | scikit-learn, agent model puller | `mms_trained_models` (default one TrainedModel from `gs://kfserving-examples/models/sklearn/1.0/model`) | v1 |
+
+`sklearn-mms` has no `storageUri`, so KServe treats it as a multi-model predictor and injects the agent sidecar with its model puller. Override its TrainedModels with JSON extra vars:
+
+```bash
+ansible-playbook deploy-pr.yml -e pr_url=... -e '{"models_to_deploy": ["sklearn-mms"]}' \
+  -e '{"mms_trained_models": [{"name": "m1", "storage_uri": "gs://..."}, {"name": "m2", "storage_uri": "https://..."}]}'
+```
+
+## SSRF checks
+
+`--ssrf-tests` (`-e run_ssrf_tests=true`) checks the HTTP(S) `storageUri` SSRF protections in the admission webhook, the Python storage-initializer and the Go agent puller. Every check runs; the summary lists PASS / FAIL / INFO and the play fails if any check failed.
+
+| # | Check | Expected |
+|---|-------|----------|
+| – | storage-initializer and agent images in use are the PR build | precheck |
+| 1–2 | Dry-run create with blocked hosts/IPs in `storageUri` and `storageUris` (loopback, metadata, private, `.svc`, dword/octal, IPv6) | rejected |
+| 3 | Dry-run create with public HTTPS, Azure Blob and `gs://` | admitted |
+| 4 | Dry-run update of an existing ISVC to a blocked URI | rejected |
+| 5 | `<ClusterIP>.nip.io` (passes admission, which does not resolve DNS) pointing at an in-cluster listener | storage-initializer refuses; the listener receives nothing |
+| 6 | Public URL redirecting to `169.254.169.254` | storage-initializer refuses |
+| 7 | Public HTTPS model | downloads and becomes Ready (regression check for the pinned-IP TLS path) |
+| 8 | TrainedModel dry-run with a blocked URI | INFO: upstream has no TrainedModel HTTP check, so the agent is the only guard |
+| 9–11 | TrainedModels with a literal ClusterIP, `<ClusterIP>.nip.io` and the metadata redirect | agent refuses |
+| 12 | TrainedModel with a public HTTPS model | agent downloads it and the predictor serves it |
+
+Checks 8–12 reuse `sklearn-mms` (deployed if the run did not already include it) and the shared TrainedModel task. Tunables live in `roles/validate/defaults/main.yml` (`ssrf_blocked_uris`, `ssrf_allowed_uris`, `ssrf_redirect_uri`, `ssrf_public_https_model_uri`, `ssrf_test_storage_uris`, `ssrf_test_agent`, `ssrf_cleanup`, ...).
+
+Checks 5, 6 and 9–11 need public DNS (`nip.io`) and egress from the cluster; check 6 and 11 call `httpbin.org` (set `-e ssrf_redirect_uri=""` to skip). If DNS fails inside the pod, check 5 reports INCONCLUSIVE instead of passing.
 
 ## Available Images
 

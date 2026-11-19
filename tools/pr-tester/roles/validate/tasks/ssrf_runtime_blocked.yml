@@ -1,0 +1,54 @@
+---
+# Creates an InferenceService whose storageUri passes admission but must be
+# refused by the storage-initializer, then asserts on the init container log.
+# Expects: _ssrf_case (name, storage_uri, check)
+
+- name: "SSRF runtime | create {{ _ssrf_case.name }}"
+  ansible.builtin.command:
+    cmd: kubectl apply -f -
+    stdin: "{{ lookup('template', 'ssrf-isvc.yml.j2') }}"
+  vars:
+    ssrf_isvc: "{{ _ssrf_case }}"
+  register: _ssrf_apply
+  changed_when: _ssrf_apply.rc == 0
+  failed_when: false
+
+- name: "SSRF runtime | wait for storage-initializer verdict on {{ _ssrf_case.name }}"
+  ansible.builtin.shell: |
+    for p in $(kubectl get pod -n {{ test_namespace }} \
+        -l serving.kserve.io/inferenceservice={{ _ssrf_case.name }} -o name 2>/dev/null); do
+      kubectl logs -n {{ test_namespace }} "$p" -c storage-initializer --tail=200 2>/dev/null
+      kubectl logs -n {{ test_namespace }} "$p" -c storage-initializer --previous --tail=200 2>/dev/null
+    done
+    true
+  args:
+    executable: /bin/bash
+  register: _ssrf_logs
+  changed_when: false
+  retries: "{{ (ssrf_runtime_timeout | int / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  until: >-
+    'blocked host or IP' in _ssrf_logs.stdout
+    or 'Unable to safely resolve' in _ssrf_logs.stdout
+  failed_when: false
+  when: _ssrf_apply.rc == 0
+
+- name: "SSRF runtime | record result for {{ _ssrf_case.name }}"
+  vars:
+    _rejected_at_admission: "{{ _ssrf_apply.rc != 0 and 'blocked host or IP' in _ssrf_apply.stderr }}"
+    _blocked_at_runtime: "{{ _ssrf_apply.rc == 0 and 'blocked host or IP' in (_ssrf_logs.stdout | default('')) }}"
+    _dns_failed: "{{ _ssrf_apply.rc == 0 and 'Unable to safely resolve' in (_ssrf_logs.stdout | default('')) }}"
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': _ssrf_case.check,
+           'result': 'PASS' if (_rejected_at_admission | bool or _blocked_at_runtime | bool) else 'FAIL',
+           'detail': (
+             'rejected at admission' if _rejected_at_admission | bool
+             else 'storage-initializer refused the URI' if _blocked_at_runtime | bool
+             else 'INCONCLUSIVE: the pod could not resolve the host; check cluster DNS egress' if _dns_failed | bool
+             else 'apply failed: ' ~ (_ssrf_apply.stderr | default('') | trim | regex_replace('\\s+', ' '))[:200] if _ssrf_apply.rc != 0
+             else 'no block message within ' ~ ssrf_runtime_timeout ~ 's; last log: '
+                  ~ ((_ssrf_logs.stdout_lines | default([]))[-3:] | join(' | '))[:300]
+           )
+         }] }}

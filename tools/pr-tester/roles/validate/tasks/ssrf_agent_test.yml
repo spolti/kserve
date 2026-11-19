@@ -1,0 +1,158 @@
+---
+# Agent puller checks. They reuse the sklearn-mms model definition and the
+# shared TrainedModel task from models_deploy. TrainedModels are downloaded
+# by the agent's Go HTTPSDownloader, a separate code path from the Python
+# storage-initializer.
+#
+#    8. TrainedModel admission for a blocked URI (INFO: v1alpha1 has no
+#       HTTP storage check upstream, so the agent is the only guard)
+#    9. agent refuses a literal ClusterIP
+#   10. agent refuses a hostname resolving to a ClusterIP
+#   11. agent refuses a public redirect to the metadata IP
+#   12. agent still downloads and serves a legitimate public HTTPS model
+#
+# Expects _ssrf_listener_ip from ssrf_test.yml.
+
+- name: SSRF agent | multi-model InferenceService
+  block:
+    # Reuse it when the run already deployed it (e.g. pr_analyze picked it
+    # for an agent change, or --models sklearn-mms).
+    - name: SSRF agent | deploy {{ ssrf_mms_model_key }} unless already deployed
+      ansible.builtin.include_role:
+        name: models_deploy
+        tasks_from: deploy_model.yml
+      vars:
+        model_key: "{{ ssrf_mms_model_key }}"
+      when: ssrf_mms_model_key not in models_to_deploy
+
+    - name: SSRF agent | remember whether the checks created it
+      ansible.builtin.set_fact:
+        _ssrf_created_mms: "{{ ssrf_mms_model_key not in models_to_deploy }}"
+
+    - name: SSRF agent | find predictor pod and agent image
+      ansible.builtin.shell: |
+        set -o pipefail
+        pod=$(kubectl get pod -n {{ test_namespace }} \
+          -l serving.kserve.io/inferenceservice={{ ssrf_mms_isvc_name }} \
+          --field-selector=status.phase=Running -o name | head -1)
+        img=$(kubectl get -n {{ test_namespace }} "$pod" \
+          -o jsonpath='{.spec.containers[?(@.name=="agent")].image}')
+        echo "${pod#pod/} ${img}"
+      args:
+        executable: /bin/bash
+      register: _ssrf_mms_pod_info
+      changed_when: false
+
+    - name: SSRF agent | set pod facts
+      ansible.builtin.set_fact:
+        _ssrf_mms_pod: "{{ (_ssrf_mms_pod_info.stdout | trim).split(' ')[0] }}"
+        _ssrf_agent_image: "{{ ((_ssrf_mms_pod_info.stdout | trim).split(' ') + [''])[1] }}"
+
+    - name: SSRF agent | record agent precheck
+      ansible.builtin.set_fact:
+        _ssrf_results: >-
+          {{ _ssrf_results + [{
+               'check': 'precheck: multi-model predictor runs the PR-built agent',
+               'result': 'PASS' if (':' ~ pr_image_tag) in _ssrf_agent_image else 'FAIL',
+               'detail': _ssrf_agent_image or 'no agent container in ' ~ _ssrf_mms_pod
+             }] }}
+
+  rescue:
+    - name: SSRF agent | record multi-model deploy failure
+      ansible.builtin.set_fact:
+        _ssrf_mms_pod: ""
+        _ssrf_created_mms: "{{ ssrf_mms_model_key not in models_to_deploy }}"
+        _ssrf_results: >-
+          {{ _ssrf_results + [{
+               'check': 'precheck: multi-model predictor runs the PR-built agent',
+               'result': 'FAIL',
+               'detail': ('could not deploy ' ~ ssrf_mms_isvc_name ~ ': '
+                          ~ (ansible_failed_result.msg | default(ansible_failed_result.stderr | default('')))
+                            | string | regex_replace('\\s+', ' '))[:300]
+             }] }}
+
+- name: SSRF agent | run TrainedModel checks
+  when: _ssrf_mms_pod | length > 0
+  block:
+    # --- 8. TrainedModel admission (informational) ---
+    - name: SSRF agent | TrainedModel admission dry-run with a blocked URI
+      ansible.builtin.include_role:
+        name: models_deploy
+        tasks_from: deploy_trained_model.yml
+      vars:
+        trained_model:
+          name: ssrf-tm-admission
+          isvc: "{{ ssrf_mms_isvc_name }}"
+          storage_uri: "http://169.254.169.254/latest/meta-data/model.joblib"
+          dry_run: true
+          allow_failure: true
+
+    - name: SSRF agent | record TrainedModel admission result
+      ansible.builtin.set_fact:
+        _ssrf_results: >-
+          {{ _ssrf_results + [{
+               'check': 'TrainedModel admission with a blocked URI',
+               'result': 'PASS' if (not (trained_model_result.applied | bool)
+                                    and 'blocked host or IP' in trained_model_result.stderr) else 'INFO',
+               'detail': 'rejected at admission' if not (trained_model_result.applied | bool)
+                         else 'admitted: no admission check for TrainedModel, so the agent is the only guard'
+             }] }}
+
+    # --- 9-11. Agent refuses internal targets ---
+    - name: SSRF agent | agent refuses internal targets
+      ansible.builtin.include_tasks: ssrf_agent_blocked.yml
+      loop:
+        - name: ssrf-tm-literal
+          storage_uri: "http://{{ _ssrf_listener_ip.stdout | trim }}:8080/model.joblib"
+          marker: "{{ _ssrf_listener_ip.stdout | trim }}:8080"
+          check: "agent refuses literal ClusterIP {{ _ssrf_listener_ip.stdout | trim }}"
+        - name: ssrf-tm-dns
+          storage_uri: "http://{{ _ssrf_listener_ip.stdout | trim }}.{{ ssrf_dns_suffix }}:8080/model.joblib"
+          marker: "{{ _ssrf_listener_ip.stdout | trim }}.{{ ssrf_dns_suffix }}"
+          check: "agent refuses {{ _ssrf_listener_ip.stdout | trim }}.{{ ssrf_dns_suffix }} (resolves to a ClusterIP)"
+        - name: ssrf-tm-redirect
+          storage_uri: "{{ ssrf_redirect_uri }}"
+          marker: "169.254.169.254"
+          check: "agent refuses redirect to 169.254.169.254"
+      loop_control:
+        loop_var: _ssrf_tm
+        label: "{{ _ssrf_tm.name }}"
+      when: _ssrf_tm.storage_uri | length > 0
+
+    # --- 12. Regression: public HTTPS through the agent ---
+    - name: SSRF agent | public HTTPS TrainedModel
+      ansible.builtin.include_role:
+        name: models_deploy
+        tasks_from: deploy_trained_model.yml
+      vars:
+        trained_model:
+          name: ssrf-tm-public
+          isvc: "{{ ssrf_mms_isvc_name }}"
+          storage_uri: "{{ ssrf_public_https_model_uri }}"
+          labels: { kserve-pr-tester/check: ssrf }
+          wait: true
+          wait_timeout: "{{ ssrf_runtime_timeout }}"
+          allow_failure: true
+
+    - name: SSRF agent | read agent log for the public model
+      ansible.builtin.command: >-
+        kubectl logs -n {{ test_namespace }} {{ _ssrf_mms_pod }} -c agent --tail=500
+      register: _ssrf_agent_public_log
+      changed_when: false
+      failed_when: false
+      when: not (trained_model_result.ready | bool)
+
+    - name: SSRF agent | record public HTTPS result
+      ansible.builtin.set_fact:
+        _ssrf_results: >-
+          {{ _ssrf_results + [{
+               'check': 'agent still downloads and serves a public HTTPS model',
+               'result': 'PASS' if trained_model_result.ready | bool else 'FAIL',
+               'detail': 'model ready on the predictor' if trained_model_result.ready | bool
+                         else ('apply failed: ' ~ (trained_model_result.stderr | trim))[:200]
+                              if not (trained_model_result.applied | bool)
+                         else ('not ready (' ~ trained_model_result.status ~ '); agent log: '
+                               ~ ((_ssrf_agent_public_log.stdout_lines | default([]))
+                                  | select('search', 'ssrf-tm-public') | list | last
+                                  | default('no lines for ssrf-tm-public')))[:300]
+             }] }}

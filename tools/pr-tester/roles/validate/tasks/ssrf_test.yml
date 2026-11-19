@@ -1,0 +1,348 @@
+---
+# HTTP(S) storageUri SSRF checks. Every check runs, results are collected,
+# and the play fails at the end if any check failed.
+#
+#   1. Admission rejects blocked hosts/IPs in storageUri          (create)
+#   2. Admission rejects blocked hosts/IPs in storageUris         (create)
+#   3. Admission accepts public HTTP(S), Azure Blob and gs:// URIs
+#   4. Admission rejects a blocked storageUri on update
+#   5. storage-initializer refuses a hostname resolving to a cluster IP,
+#      and no request reaches the in-cluster listener
+#   6. storage-initializer refuses a public redirect to the metadata IP
+#   7. A legitimate public HTTPS model still downloads and becomes Ready
+#   8-12. Same for the agent puller via TrainedModels (ssrf_agent_test.yml)
+#
+# Nothing here posts to GitHub/GitLab or pushes images.
+
+- name: SSRF | initialize results
+  ansible.builtin.set_fact:
+    _ssrf_results: []
+
+- name: SSRF | ensure test namespace exists
+  ansible.builtin.shell: |
+    kubectl create namespace {{ test_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+  changed_when: false
+
+# --- Precheck: the runtime checks are only meaningful with the PR image ---
+
+- name: SSRF | read storage-initializer image in use
+  ansible.builtin.shell: |
+    img=$(kubectl get clusterstoragecontainer default -o jsonpath='{.spec.container.image}' 2>/dev/null)
+    if [ -z "$img" ]; then
+      img=$(kubectl get configmap inferenceservice-config -n {{ kserve_namespace }} \
+        -o jsonpath='{.data.storageInitializer}' | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("image",""))')
+    fi
+    echo "$img"
+  args:
+    executable: /bin/bash
+  register: _ssrf_si_image
+  changed_when: false
+
+- name: SSRF | record storage-initializer image precheck
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'precheck: storage-initializer is the PR build',
+           'result': 'PASS' if (':' ~ pr_image_tag) in _ssrf_si_image.stdout else 'FAIL',
+           'detail': _ssrf_si_image.stdout | trim
+         }] }}
+
+# --- 1. Admission: storageUri ---
+
+- name: SSRF | admission dry-run with blocked storageUri
+  ansible.builtin.command:
+    cmd: kubectl create --dry-run=server -f -
+    stdin: "{{ lookup('template', 'ssrf-isvc.yml.j2') }}"
+  vars:
+    ssrf_isvc: { name: ssrf-block-uri, storage_uri: "{{ item }}" }
+  loop: "{{ ssrf_blocked_uris }}"
+  register: _ssrf_adm_uri
+  changed_when: false
+  failed_when: false
+
+- name: SSRF | record blocked storageUri results
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'admission rejects storageUri ' ~ item.item,
+           'result': 'PASS' if (item.rc != 0 and 'blocked host or IP' in item.stderr) else 'FAIL',
+           'detail': 'admitted' if item.rc == 0 else (item.stderr | trim | regex_replace('\\s+', ' '))[:200]
+         }] }}
+  loop: "{{ _ssrf_adm_uri.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# --- 2. Admission: storageUris ---
+
+- name: SSRF | admission dry-run with blocked storageUris
+  ansible.builtin.command:
+    cmd: kubectl create --dry-run=server -f -
+    stdin: "{{ lookup('template', 'ssrf-isvc.yml.j2') }}"
+  vars:
+    ssrf_isvc: { name: ssrf-block-uris, storage_uris: ["{{ item }}"] }
+  loop: "{{ ssrf_blocked_uris }}"
+  register: _ssrf_adm_uris
+  changed_when: false
+  failed_when: false
+  when: ssrf_test_storage_uris | bool
+
+- name: SSRF | record blocked storageUris results
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'admission rejects storageUris ' ~ item.item,
+           'result': 'PASS' if (item.rc != 0 and 'blocked host or IP' in item.stderr) else 'FAIL',
+           'detail': 'admitted' if item.rc == 0 else (item.stderr | trim | regex_replace('\\s+', ' '))[:200]
+         }] }}
+  loop: "{{ _ssrf_adm_uris.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: ssrf_test_storage_uris | bool
+
+# --- 3. Admission: allowed URIs ---
+
+- name: SSRF | admission dry-run with allowed storageUri
+  ansible.builtin.command:
+    cmd: kubectl create --dry-run=server -f -
+    stdin: "{{ lookup('template', 'ssrf-isvc.yml.j2') }}"
+  vars:
+    ssrf_isvc: { name: ssrf-allow-uri, storage_uri: "{{ item }}" }
+  loop: "{{ ssrf_allowed_uris }}"
+  register: _ssrf_adm_allowed
+  changed_when: false
+  failed_when: false
+
+- name: SSRF | record allowed storageUri results
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'admission accepts storageUri ' ~ item.item,
+           'result': 'PASS' if item.rc == 0 else 'FAIL',
+           'detail': 'admitted' if item.rc == 0 else (item.stderr | trim | regex_replace('\\s+', ' '))[:200]
+         }] }}
+  loop: "{{ _ssrf_adm_allowed.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# --- 4. Admission: update path ---
+
+- name: SSRF | create InferenceService for the update check
+  ansible.builtin.command:
+    cmd: kubectl apply -f -
+    stdin: "{{ lookup('template', 'ssrf-isvc.yml.j2') }}"
+  vars:
+    ssrf_isvc: { name: ssrf-update-check, storage_uri: "gs://kfserving-examples/models/sklearn/1.0/model" }
+  register: _ssrf_update_create
+  changed_when: _ssrf_update_create.rc == 0
+  failed_when: false
+
+- name: SSRF | dry-run update to a blocked storageUri
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - patch
+      - inferenceservice
+      - ssrf-update-check
+      - -n
+      - "{{ test_namespace }}"
+      - --type=merge
+      - --dry-run=server
+      - -p
+      - '{"spec":{"predictor":{"model":{"storageUri":"http://169.254.169.254/latest/meta-data/"}}}}'
+  register: _ssrf_update_patch
+  changed_when: false
+  failed_when: false
+  when: _ssrf_update_create.rc == 0
+
+- name: SSRF | record update check result
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'admission rejects blocked storageUri on update',
+           'result': 'PASS' if (_ssrf_update_create.rc == 0 and _ssrf_update_patch.rc != 0
+                                and 'blocked host or IP' in _ssrf_update_patch.stderr) else 'FAIL',
+           'detail': ('could not create base InferenceService: ' ~ (_ssrf_update_create.stderr | trim))[:200]
+                     if _ssrf_update_create.rc != 0
+                     else 'update admitted' if _ssrf_update_patch.rc == 0
+                     else (_ssrf_update_patch.stderr | trim | regex_replace('\\s+', ' '))[:200]
+         }] }}
+
+# --- 5. Runtime: hostname resolving to a cluster IP, with listener ---
+
+- name: SSRF | deploy in-cluster listener
+  ansible.builtin.command:
+    cmd: kubectl apply -f -
+    stdin: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: ssrf-listener
+        namespace: {{ test_namespace }}
+        labels:
+          app: ssrf-listener
+          app.kubernetes.io/managed-by: kserve-pr-tester
+      spec:
+        containers:
+          - name: listener
+            image: {{ ssrf_listener_image }}
+            command: ["python3", "-u", "-m", "http.server", "8080"]
+            ports:
+              - containerPort: 8080
+            readinessProbe:
+              tcpSocket:
+                port: 8080
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ssrf-listener
+        namespace: {{ test_namespace }}
+        labels:
+          app.kubernetes.io/managed-by: kserve-pr-tester
+      spec:
+        selector:
+          app: ssrf-listener
+        ports:
+          - port: 8080
+            targetPort: 8080
+  changed_when: true
+
+- name: SSRF | wait for listener
+  ansible.builtin.command: >-
+    kubectl wait pod/ssrf-listener -n {{ test_namespace }}
+    --for=condition=Ready --timeout={{ ssrf_runtime_timeout }}s
+  changed_when: false
+
+- name: SSRF | get listener ClusterIP
+  ansible.builtin.command: >-
+    kubectl get svc ssrf-listener -n {{ test_namespace }} -o jsonpath='{.spec.clusterIP}'
+  register: _ssrf_listener_ip
+  changed_when: false
+
+- name: SSRF | storage-initializer refuses hostname resolving to a cluster IP
+  ansible.builtin.include_tasks: ssrf_runtime_blocked.yml
+  vars:
+    _ssrf_case:
+      name: ssrf-private-dns
+      storage_uri: "http://{{ _ssrf_listener_ip.stdout | trim }}.{{ ssrf_dns_suffix }}:8080/model.joblib"
+      check: "runtime refuses {{ _ssrf_listener_ip.stdout | trim }}.{{ ssrf_dns_suffix }} (resolves to a ClusterIP)"
+
+- name: SSRF | read listener access log
+  ansible.builtin.command: kubectl logs pod/ssrf-listener -n {{ test_namespace }}
+  register: _ssrf_listener_log
+  changed_when: false
+  failed_when: false
+
+- name: SSRF | record listener result
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'no request reached the in-cluster listener',
+           'result': 'FAIL' if ('"GET ' in _ssrf_listener_log.stdout or '"GET ' in _ssrf_listener_log.stderr) else 'PASS',
+           'detail': ((_ssrf_listener_log.stdout ~ _ssrf_listener_log.stderr) | regex_findall('"GET [^"]*"') | join(', '))[:200]
+                     or 'listener log has no requests'
+         }] }}
+
+# --- 6. Runtime: public redirect to the metadata IP ---
+
+- name: SSRF | storage-initializer refuses a redirect to the metadata IP
+  ansible.builtin.include_tasks: ssrf_runtime_blocked.yml
+  vars:
+    _ssrf_case:
+      name: ssrf-redirect
+      storage_uri: "{{ ssrf_redirect_uri }}"
+      check: "runtime refuses redirect to 169.254.169.254"
+  when: ssrf_redirect_uri | length > 0
+
+# --- 7. Regression: a legitimate public HTTPS model still works ---
+
+- name: SSRF | deploy public HTTPS model
+  ansible.builtin.command:
+    cmd: kubectl apply -f -
+    stdin: "{{ lookup('template', 'ssrf-isvc.yml.j2') }}"
+  vars:
+    ssrf_isvc: { name: ssrf-public-https, storage_uri: "{{ ssrf_public_https_model_uri }}" }
+  register: _ssrf_public_apply
+  changed_when: _ssrf_public_apply.rc == 0
+  failed_when: false
+
+- name: SSRF | wait for public HTTPS model to be Ready
+  ansible.builtin.command: >-
+    kubectl wait inferenceservice/ssrf-public-https -n {{ test_namespace }}
+    --for=condition=Ready --timeout={{ ssrf_runtime_timeout }}s
+  register: _ssrf_public_wait
+  changed_when: false
+  failed_when: false
+  when: _ssrf_public_apply.rc == 0
+
+- name: SSRF | collect public HTTPS storage-initializer log on failure
+  ansible.builtin.shell: |
+    for p in $(kubectl get pod -n {{ test_namespace }} \
+        -l serving.kserve.io/inferenceservice=ssrf-public-https -o name 2>/dev/null); do
+      kubectl logs -n {{ test_namespace }} "$p" -c storage-initializer --tail=5 2>/dev/null
+      kubectl logs -n {{ test_namespace }} "$p" -c storage-initializer --previous --tail=5 2>/dev/null
+    done
+    true
+  args:
+    executable: /bin/bash
+  register: _ssrf_public_log
+  changed_when: false
+  when: _ssrf_public_apply.rc != 0 or (_ssrf_public_wait.rc | default(1)) != 0
+
+- name: SSRF | record public HTTPS result
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': 'public HTTPS model still downloads and becomes Ready',
+           'result': 'PASS' if (_ssrf_public_apply.rc == 0 and (_ssrf_public_wait.rc | default(1)) == 0) else 'FAIL',
+           'detail': 'Ready' if (_ssrf_public_apply.rc == 0 and (_ssrf_public_wait.rc | default(1)) == 0)
+                     else ('apply failed: ' ~ (_ssrf_public_apply.stderr | trim))[:200] if _ssrf_public_apply.rc != 0
+                     else ('not Ready; storage-initializer: ' ~ (_ssrf_public_log.stdout_lines | default([]) | join(' | ')))[:300]
+         }] }}
+
+# --- 8-12. Agent puller (TrainedModels on a multi-model InferenceService) ---
+
+- name: SSRF | agent puller checks
+  ansible.builtin.include_tasks: ssrf_agent_test.yml
+  when: ssrf_test_agent | bool
+
+# --- Report and clean up ---
+
+- name: SSRF | summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+        SSRF CHECKS ({{ pr_source | default('github') }} #{{ pr_number }}{{ ' @ ' ~ pr_head_sha[:12] if pr_head_sha is defined else '' }})
+      ========================================
+      {% for r in _ssrf_results %}
+      [{{ r.result }}] {{ r.check }}
+      {% if r.result != 'PASS' or r.detail | length < 80 %}
+             {{ r.detail }}
+      {% endif %}
+      {% endfor %}
+      ----------------------------------------
+      {{ _ssrf_results | selectattr('result', 'equalto', 'PASS') | list | length }} passed,
+      {{ _ssrf_results | selectattr('result', 'equalto', 'FAIL') | list | length }} failed,
+      {{ _ssrf_results | selectattr('result', 'equalto', 'INFO') | list | length }} informational
+      ========================================
+
+# TrainedModels first, so the agent unloads them before their predictor goes.
+- name: SSRF | clean up test resources
+  ansible.builtin.shell: |
+    kubectl delete trainedmodel -n {{ test_namespace }} -l kserve-pr-tester/check=ssrf --ignore-not-found
+    kubectl delete inferenceservice -n {{ test_namespace }} -l kserve-pr-tester/check=ssrf --ignore-not-found --wait=false
+    {% if _ssrf_created_mms | default(false) | bool %}
+    kubectl delete trainedmodel -n {{ test_namespace }} -l kserve-pr-tester/pr={{ pr_number }} --ignore-not-found
+    kubectl delete inferenceservice -n {{ test_namespace }} {{ ssrf_mms_isvc_name }} --ignore-not-found --wait=false
+    {% endif %}
+    kubectl delete pod,svc -n {{ test_namespace }} ssrf-listener --ignore-not-found --wait=false
+  changed_when: true
+  failed_when: false
+  when: ssrf_cleanup | bool
+
+- name: SSRF | fail if any check failed
+  ansible.builtin.fail:
+    msg: >-
+      {{ _ssrf_results | selectattr('result', 'equalto', 'FAIL') | list | length }} SSRF check(s) failed.
+      See the summary above.
+  when: _ssrf_results | selectattr('result', 'equalto', 'FAIL') | list | length > 0

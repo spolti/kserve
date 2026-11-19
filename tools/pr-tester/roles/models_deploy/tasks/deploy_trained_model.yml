@@ -1,0 +1,96 @@
+---
+# Deploys one TrainedModel onto a multi-model InferenceService. The agent
+# sidecar's puller downloads it into /mnt/models/<name>.
+#
+# Reusable from any role or play:
+#
+#   - ansible.builtin.include_role:
+#       name: models_deploy
+#       tasks_from: deploy_trained_model.yml
+#     vars:
+#       trained_model:
+#         name: my-model                # required
+#         isvc: sklearn-mms             # required, a multi-model InferenceService
+#         storage_uri: gs://...         # required
+#         framework: sklearn            # default sklearn
+#         memory: 128Mi                 # default 128Mi
+#         namespace: kserve-pr-test     # default test_namespace
+#         labels: {key: value}          # extra labels
+#         wait: true                    # wait until the predictor reports it ready
+#         wait_timeout: 300             # seconds, default isvc_ready_timeout
+#         dry_run: false                # server-side dry run (admission only)
+#         allow_failure: false          # record failures instead of failing
+#
+# Sets trained_model_result: {name, applied, ready, rc, stderr, status}
+
+- name: "TrainedModel | validate parameters for {{ trained_model.name | default('?') }}"
+  ansible.builtin.assert:
+    that:
+      - trained_model is defined
+      - trained_model.name | default('') | length > 0
+      - trained_model.isvc | default('') | length > 0
+      - trained_model.storage_uri | default('') | length > 0
+    fail_msg: "trained_model needs at least name, isvc and storage_uri"
+
+- name: "TrainedModel | apply {{ trained_model.name }}"
+  ansible.builtin.command:
+    cmd: >-
+      kubectl {{ 'create --dry-run=server' if trained_model.dry_run | default(false) | bool else 'apply' }} -f -
+    stdin: "{{ lookup('template', 'trainedmodel.yml.j2') }}"
+  register: _tm_apply
+  changed_when: _tm_apply.rc == 0 and not (trained_model.dry_run | default(false) | bool)
+  failed_when: false
+
+# The v1 protocol model endpoint on the predictor Service, reached through the
+# API server's service proxy, so no port-forward is needed (raw deployment).
+- name: "TrainedModel | wait for {{ trained_model.name }} to be ready"
+  ansible.builtin.command: >-
+    kubectl get --raw
+    /api/v1/namespaces/{{ trained_model.namespace | default(test_namespace) }}/services/{{ trained_model.isvc }}-predictor:80/proxy/v1/models/{{ trained_model.name }}
+  register: _tm_ready
+  changed_when: false
+  failed_when: false
+  retries: "{{ ((trained_model.wait_timeout | default(isvc_ready_timeout)) | int / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  until: _tm_ready.rc == 0 and (_tm_ready.stdout | from_json).ready | default(false)
+  when:
+    - _tm_apply.rc == 0
+    - trained_model.wait | default(true) | bool
+    - not (trained_model.dry_run | default(false) | bool)
+
+- name: "TrainedModel | read status of {{ trained_model.name }}"
+  ansible.builtin.command: >-
+    kubectl get trainedmodel {{ trained_model.name }}
+    -n {{ trained_model.namespace | default(test_namespace) }}
+    -o jsonpath='{range .status.conditions[*]}{.type}={.status} {end}'
+  register: _tm_status
+  changed_when: false
+  failed_when: false
+  when:
+    - _tm_apply.rc == 0
+    - not (trained_model.dry_run | default(false) | bool)
+
+- name: "TrainedModel | record result for {{ trained_model.name }}"
+  ansible.builtin.set_fact:
+    trained_model_result:
+      name: "{{ trained_model.name }}"
+      applied: "{{ _tm_apply.rc == 0 }}"
+      ready: "{{ _tm_ready is not skipped and (_tm_ready.rc | default(1)) == 0 and (_tm_ready.stdout | default('{}') | from_json).ready | default(false) }}"
+      rc: "{{ _tm_apply.rc }}"
+      stderr: "{{ _tm_apply.stderr | default('') }}"
+      status: "{{ _tm_status.stdout | default('') | trim }}"
+
+- name: "TrainedModel | fail on error for {{ trained_model.name }}"
+  ansible.builtin.fail:
+    msg: |
+      TrainedModel {{ trained_model.name }} on {{ trained_model.isvc }} failed:
+        applied: {{ trained_model_result.applied }}
+        ready:   {{ trained_model_result.ready }}
+        status:  {{ trained_model_result.status }}
+        error:   {{ trained_model_result.stderr | trim }}
+  when:
+    - not (trained_model.allow_failure | default(false) | bool)
+    - not (trained_model_result.applied | bool)
+      or (trained_model.wait | default(true) | bool
+          and not (trained_model.dry_run | default(false) | bool)
+          and not (trained_model_result.ready | bool))

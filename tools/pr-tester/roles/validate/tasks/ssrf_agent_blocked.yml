@@ -1,0 +1,55 @@
+---
+# Creates a TrainedModel (shared models_deploy task) on the multi-model
+# InferenceService and asserts the agent puller (Go HTTPSDownloader) refuses
+# its storageUri.
+# Expects: _ssrf_tm (name, storage_uri, marker, check), _ssrf_mms_pod
+
+- name: "SSRF agent | create TrainedModel {{ _ssrf_tm.name }}"
+  ansible.builtin.include_role:
+    name: models_deploy
+    tasks_from: deploy_trained_model.yml
+  vars:
+    trained_model:
+      name: "{{ _ssrf_tm.name }}"
+      isvc: "{{ ssrf_mms_isvc_name }}"
+      storage_uri: "{{ _ssrf_tm.storage_uri }}"
+      labels: { kserve-pr-tester/check: ssrf }
+      wait: false
+      allow_failure: true
+
+- name: "SSRF agent | wait for agent verdict on {{ _ssrf_tm.name }}"
+  ansible.builtin.command: >-
+    kubectl logs -n {{ test_namespace }} {{ _ssrf_mms_pod }} -c agent --tail=500
+  register: _ssrf_agent_log
+  changed_when: false
+  failed_when: false
+  retries: "{{ (ssrf_runtime_timeout | int / 10) | round(0, 'ceil') | int }}"
+  delay: 10
+  until: >-
+    _ssrf_agent_log.stdout_lines
+    | select('search', 'blocked host or IP')
+    | select('search', _ssrf_tm.marker | regex_escape)
+    | list | length > 0
+  when: trained_model_result.applied | bool
+
+- name: "SSRF agent | record result for {{ _ssrf_tm.name }}"
+  vars:
+    _rejected_at_admission: "{{ not (trained_model_result.applied | bool) and 'blocked host or IP' in trained_model_result.stderr }}"
+    _blocked_lines: >-
+      {{ (_ssrf_agent_log.stdout_lines | default([]))
+         | select('search', 'blocked host or IP')
+         | select('search', _ssrf_tm.marker | regex_escape) | list }}
+  ansible.builtin.set_fact:
+    _ssrf_results: >-
+      {{ _ssrf_results + [{
+           'check': _ssrf_tm.check,
+           'result': 'PASS' if (_rejected_at_admission | bool or _blocked_lines | length > 0) else 'FAIL',
+           'detail': (
+             'rejected at admission' if _rejected_at_admission | bool
+             else 'agent refused the URI' if _blocked_lines | length > 0
+             else 'apply failed: ' ~ (trained_model_result.stderr | trim | regex_replace('\\s+', ' '))[:200]
+                  if not (trained_model_result.applied | bool)
+             else 'no block message in agent log within ' ~ ssrf_runtime_timeout ~ 's; last log: '
+                  ~ ((_ssrf_agent_log.stdout_lines | default([]))[-3:] | join(' | '))[:300]
+           )
+         }] }}

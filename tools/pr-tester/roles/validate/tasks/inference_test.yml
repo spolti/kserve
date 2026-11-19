@@ -34,7 +34,7 @@
 
 - name: "Send test inference to {{ model_key }}"
   ansible.builtin.uri:
-    url: "http://localhost:8280/v1/models/{{ _model.name }}:predict"
+    url: "http://localhost:8280/v1/models/{{ _model.inference_model_name | default(_model.name) }}:predict"
     method: POST
     body: "{{ _model.inference_payload }}"
     body_format: json

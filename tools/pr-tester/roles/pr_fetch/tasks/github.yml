@@ -1,0 +1,102 @@
+---
+- name: Validate pr_url is provided
+  ansible.builtin.assert:
+    that:
+      - pr_url is defined
+      - pr_url | length > 0
+    fail_msg: "pr_url is required. Pass it with -e pr_url=https://github.com/owner/repo/pull/NUMBER"
+
+- name: Parse PR URL
+  ansible.builtin.set_fact:
+    _pr_match: "{{ pr_url | regex_search('https://github\\.com/([^/]+)/([^/]+)/pull/([0-9]+)', '\\1', '\\2', '\\3') }}"
+
+- name: Validate parsed PR URL
+  ansible.builtin.assert:
+    that:
+      - _pr_match | length == 3
+    fail_msg: "Invalid PR URL format: {{ pr_url }}. Expected https://github.com/OWNER/REPO/pull/NUMBER"
+
+- name: Set PR metadata facts
+  ansible.builtin.set_fact:
+    pr_owner: "{{ _pr_match[0] }}"
+    pr_repo: "{{ _pr_match[1] }}"
+    pr_number: "{{ _pr_match[2] }}"
+    pr_timestamp: "{{ ansible_facts['date_time']['epoch'] }}"
+
+- name: Set sandbox path
+  ansible.builtin.set_fact:
+    sandbox_dir: "{{ sandbox_base }}/pr-{{ pr_number }}-{{ pr_timestamp }}"
+    pr_image_tag: "{{ image_tag_prefix }}-{{ pr_number }}"
+
+- name: Display PR info
+  ansible.builtin.debug:
+    msg: |
+      PR #{{ pr_number }} from {{ pr_owner }}/{{ pr_repo }}
+      Sandbox: {{ sandbox_dir }}
+      Image tag: {{ pr_image_tag }}
+
+- name: Ensure gh CLI is available
+  ansible.builtin.command: gh --version
+  changed_when: false
+
+- name: Create sandbox directory
+  ansible.builtin.file:
+    path: "{{ sandbox_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Clone repository into sandbox
+  ansible.builtin.command:
+    cmd: >
+      git clone --depth=50
+      https://github.com/{{ pr_owner }}/{{ pr_repo }}.git
+      {{ sandbox_dir }}/{{ pr_repo }}
+  args:
+    creates: "{{ sandbox_dir }}/{{ pr_repo }}/.git"
+
+- name: Checkout PR branch
+  ansible.builtin.command:
+    cmd: gh pr checkout {{ pr_number }}
+  args:
+    chdir: "{{ sandbox_dir }}/{{ pr_repo }}"
+  environment:
+    GH_TOKEN: "{{ lookup('env', 'GH_TOKEN') | default(lookup('env', 'GITHUB_TOKEN'), true) }}"
+
+- name: Get PR base branch
+  ansible.builtin.command:
+    cmd: gh pr view {{ pr_number }} --json baseRefName -q .baseRefName
+  args:
+    chdir: "{{ sandbox_dir }}/{{ pr_repo }}"
+  register: _pr_base_branch
+  changed_when: false
+  environment:
+    GH_TOKEN: "{{ lookup('env', 'GH_TOKEN') | default(lookup('env', 'GITHUB_TOKEN'), true) }}"
+
+- name: Set base branch fact
+  ansible.builtin.set_fact:
+    pr_base_branch: "{{ _pr_base_branch.stdout | trim }}"
+
+- name: Fetch base branch for diff comparison
+  ansible.builtin.command:
+    cmd: git fetch origin {{ pr_base_branch }}:refs/remotes/origin/{{ pr_base_branch }} --depth=50
+  args:
+    chdir: "{{ sandbox_dir }}/{{ pr_repo }}"
+
+- name: Set source directory fact
+  ansible.builtin.set_fact:
+    source_dir: "{{ sandbox_dir }}/{{ pr_repo }}"
+
+- name: Trigger Copilot review (optional)
+  ansible.builtin.command:
+    cmd: >
+      gh pr review {{ pr_number }}
+      --comment -b "@copilot review this PR for security and correctness"
+  args:
+    chdir: "{{ source_dir }}"
+  environment:
+    GH_TOKEN: "{{ lookup('env', 'GH_TOKEN') | default(lookup('env', 'GITHUB_TOKEN'), true) }}"
+  when: enable_copilot_review | bool
+
+- name: PR fetch complete
+  ansible.builtin.debug:
+    msg: "PR #{{ pr_number }} checked out at {{ source_dir }} (base: {{ pr_base_branch }})"

@@ -52,15 +52,95 @@
           ]'
       when: "'kserve' in kserve_install_types"
 
-    - name: Patch sidecar image env vars
-      ansible.builtin.command: >-
-        kubectl set env deployment/kserve-controller-manager
-        -n {{ kserve_namespace }}
-        AGENT_IMAGE={{ _img_prefix }}agent:{{ pr_image_tag }}
-        ROUTER_IMAGE={{ _img_prefix }}router:{{ pr_image_tag }}
-        STORAGE_INITIALIZER_IMAGE={{ _img_prefix }}storage-initializer:{{ pr_image_tag }}
+    # The controller does not read image env vars. Sidecar and init container
+    # images come from inferenceservice-config, and for URIs matched by a
+    # ClusterStorageContainer (gs://, s3://, http(s)://, ...) from that CR.
+    - name: Patch sidecar and storage-initializer images
       when: "'kserve' in kserve_install_types"
-      failed_when: false
+      vars:
+        _sidecar_images:
+          - { key: agent, build: agent, image: agent }
+          - { key: router, build: router, image: router }
+          - { key: storageInitializer, build: storage-initializer, image: storage-initializer }
+      block:
+        - name: Read inferenceservice-config
+          ansible.builtin.command: >-
+            kubectl get configmap inferenceservice-config
+            -n {{ kserve_namespace }} -o json
+          changed_when: false
+          register: _isvc_cm
+
+        - name: Compute inferenceservice-config image overrides
+          ansible.builtin.set_fact:
+            _sidecar_patch: >-
+              {{ _sidecar_patch | default({}) | combine({
+                   item.key: (((_isvc_cm.stdout | from_json).data[item.key] | from_json)
+                              | combine({'image': _img_prefix ~ item.image ~ ':' ~ pr_image_tag})) | to_json
+                 }) }}
+          loop: "{{ _sidecar_images }}"
+          loop_control:
+            label: "{{ item.key }}"
+          when:
+            - item.build in images_to_build
+            - item.key in (_isvc_cm.stdout | from_json).data
+
+        - name: Patch inferenceservice-config with PR-built images
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - patch
+              - configmap
+              - inferenceservice-config
+              - -n
+              - "{{ kserve_namespace }}"
+              - --type=merge
+              - -p
+              - "{{ {'data': _sidecar_patch} | to_json }}"
+          changed_when: true
+          when: _sidecar_patch | default({}) | length > 0
+
+        - name: Check default ClusterStorageContainer
+          ansible.builtin.command: kubectl get clusterstoragecontainer default -o name
+          changed_when: false
+          failed_when: false
+          register: _default_csc
+          when: "'storage-initializer' in images_to_build"
+
+        - name: Patch default ClusterStorageContainer with PR-built storage-initializer
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - patch
+              - clusterstoragecontainer
+              - default
+              - --type=json
+              - -p
+              - >-
+                {{ [{'op': 'replace', 'path': '/spec/container/image',
+                     'value': _img_prefix ~ 'storage-initializer:' ~ pr_image_tag},
+                    {'op': 'replace', 'path': '/spec/container/imagePullPolicy',
+                     'value': _pull_policy}] | to_json }}
+          changed_when: true
+          when:
+            - "'storage-initializer' in images_to_build"
+            - _default_csc.rc == 0
+
+        - name: Show effective sidecar and storage-initializer images
+          ansible.builtin.shell: |
+            set -o pipefail
+            echo "inferenceservice-config:"
+            kubectl get configmap inferenceservice-config -n {{ kserve_namespace }} -o json \
+              | python3 -I -c 'import json,sys; d=json.load(sys.stdin)["data"]; [print(f"  {k}: {json.loads(d[k]).get(\"image\")}") for k in ("agent","router","storageInitializer") if k in d]'
+            echo "clusterstoragecontainer/default:"
+            kubectl get clusterstoragecontainer default -o jsonpath='  {.spec.container.image}{"\n"}' 2>/dev/null || echo "  (not present)"
+          args:
+            executable: /bin/bash
+          changed_when: false
+          register: _effective_images
+
+        - name: Display effective images
+          ansible.builtin.debug:
+            msg: "{{ _effective_images.stdout }}"
 
     - name: Patch LLMISvc controller image and pull policy
       ansible.builtin.shell: |

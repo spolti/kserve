@@ -4,6 +4,14 @@ isvc_ready_timeout: 300
 models_to_deploy:
   - sklearn-iris
 
+# TrainedModels loaded by the agent puller into the sklearn-mms InferenceService.
+# Override with JSON extra vars (the key=value form would pass a string):
+#   -e '{"mms_trained_models": [{"name": "m1", "storage_uri": "gs://..."}]}'
+# Each entry accepts the keys documented in tasks/deploy_trained_model.yml.
+mms_trained_models:
+  - name: sklearn-mms-model1
+    storage_uri: "gs://kfserving-examples/models/sklearn/1.0/model"
+
 # Model definitions with storage URIs and inference payloads.
 # kind: InferenceService or LLMInferenceService
 _model_definitions:
@@ -29,6 +37,17 @@ _model_definitions:
     runtime: lightgbm
     storage_uri: "gs://kfserving-examples/models/lgb/iris"
     protocol_version: v1
+    inference_payload: |
+      {"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}
+  # Multi-model serving: no storageUri, so KServe injects the agent with the
+  # model puller; models arrive as TrainedModels (mms_trained_models).
+  sklearn-mms:
+    name: sklearn-mms
+    kind: InferenceService
+    runtime: sklearn
+    protocol_version: v1
+    trained_models: "{{ mms_trained_models }}"
+    inference_model_name: "{{ mms_trained_models[0].name }}"
     inference_payload: |
       {"instances": [[6.8, 2.8, 4.8, 1.4], [6.0, 3.4, 4.5, 1.6]]}
   sklearn-canary:

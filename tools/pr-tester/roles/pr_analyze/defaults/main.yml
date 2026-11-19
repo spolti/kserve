@@ -69,7 +69,8 @@ _component_config:
   agent:
     install_types: ["kserve"]
     images: ["controller", "agent", "storage-initializer"]
-    models: ["sklearn-iris"]
+    # sklearn-mms exercises the agent's model puller through TrainedModels
+    models: ["sklearn-iris", "sklearn-mms"]
 
   router:
     install_types: ["kserve"]

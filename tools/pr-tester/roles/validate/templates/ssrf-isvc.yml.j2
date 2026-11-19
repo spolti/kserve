@@ -1,0 +1,31 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: {{ ssrf_isvc.name }}
+  namespace: {{ test_namespace }}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/pr: "{{ pr_number }}"
+    kserve-pr-tester/check: ssrf
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: sklearn
+{% if ssrf_isvc.storage_uri is defined %}
+      storageUri: "{{ ssrf_isvc.storage_uri }}"
+{% endif %}
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "1Gi"
+{% if ssrf_isvc.storage_uris is defined %}
+    storageUris:
+{% for uri in ssrf_isvc.storage_uris %}
+      - uri: "{{ uri }}"
+        mountPath: /mnt/models
+{% endfor %}
+{% endif %}

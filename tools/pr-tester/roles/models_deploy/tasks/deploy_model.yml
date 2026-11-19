@@ -26,3 +26,14 @@
   retries: 2
   delay: 30
   until: _isvc_wait.rc == 0
+
+# Multi-model InferenceServices: deploy their TrainedModels once the
+# predictor (and its agent puller) is up.
+- name: "Deploy TrainedModels for {{ _model.name }}"
+  ansible.builtin.include_tasks: deploy_trained_model.yml
+  loop: "{{ _model.trained_models | default([]) }}"
+  loop_control:
+    loop_var: _tm_item
+    label: "{{ _tm_item.name }}"
+  vars:
+    trained_model: "{{ {'isvc': _model.name} | combine(_tm_item) }}"

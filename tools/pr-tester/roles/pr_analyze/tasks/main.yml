@@ -22,7 +22,7 @@
 
     - name: Display changed files count
       ansible.builtin.debug:
-        msg: "PR #{{ pr_number }} changes {{ _changed_files.stdout_lines | length }} file(s)"
+        msg: "{{ 'MR !' if pr_source | default('github') == 'gitlab' else 'PR #' }}{{ pr_number }} changes {{ _changed_files.stdout_lines | length }} file(s)"
 
     - name: Detect affected components
       ansible.builtin.set_fact:

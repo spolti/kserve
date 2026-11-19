@@ -1,3 +1,61 @@
 kserve_namespace: kserve
 test_namespace: kserve-pr-test
 run_inference_test: true
+
+# ---------------------------------------------------------------------------
+# HTTP(S) storageUri SSRF checks (ssrf_test.yml), enabled with run_ssrf_tests.
+# ---------------------------------------------------------------------------
+run_ssrf_tests: false
+
+# Delete the InferenceServices and listener created by the checks.
+ssrf_cleanup: true
+
+# Admission must reject these in both storageUri and storageUris.
+ssrf_blocked_uris:
+  - "http://127.0.0.1/model.joblib"
+  - "http://169.254.169.254/latest/meta-data/"
+  - "http://10.0.0.1/model.joblib"
+  - "http://localhost/model.joblib"
+  - "https://kubernetes.default.svc/api/v1"
+  - "http://metadata.google.internal/computeMetadata/v1/"
+  - "http://2130706433/model.joblib"
+  - "http://0177.0.0.1/model.joblib"
+  - "http://[::1]/model.joblib"
+
+# Admission must accept these (dry-run only, nothing is downloaded).
+ssrf_allowed_uris:
+  - "https://example.com/model.joblib"
+  - "https://kfserving.blob.core.windows.net/triton/model.joblib"
+  - "gs://kfserving-examples/models/sklearn/1.0/model"
+
+# Exercise the predictor-level storageUris field. Disable for trees whose
+# CRD does not have it.
+ssrf_test_storage_uris: true
+
+# Wildcard DNS service that maps <ip>.<suffix> to <ip>. Admission does not
+# resolve DNS, so such a name reaches the storage-initializer, which must
+# refuse it after resolution. The cluster needs public DNS for this.
+ssrf_dns_suffix: nip.io
+
+# In-cluster listener that stands in for an internal endpoint. The check
+# fails if any request reaches it.
+ssrf_listener_image: "registry.access.redhat.com/ubi9/python-312:latest"
+
+# A public URL redirecting to the metadata endpoint. The storage-initializer
+# must refuse to follow it. Set to "" to skip (it calls an external service;
+# no credentials are sent).
+ssrf_redirect_uri: "https://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2Fmodel.joblib&status_code=302"
+
+# A legitimate public HTTPS model. It must still download and serve, which
+# exercises the pinned-IP TLS path against a real server.
+ssrf_public_https_model_uri: "https://storage.googleapis.com/kfserving-examples/models/sklearn/1.0/model/model.joblib"
+
+# Seconds to wait for storage-initializer output or InferenceService readiness.
+ssrf_runtime_timeout: 300
+
+# Agent puller checks (ssrf_agent_test.yml): TrainedModels on a multi-model
+# InferenceService. Reuses the models_deploy model definition below, and the
+# InferenceService itself when models_to_deploy already includes it.
+ssrf_test_agent: true
+ssrf_mms_model_key: sklearn-mms
+ssrf_mms_isvc_name: "{{ _model_definitions[ssrf_mms_model_key].name }}"

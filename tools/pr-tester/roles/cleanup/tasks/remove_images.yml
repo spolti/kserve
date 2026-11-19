@@ -1,11 +1,12 @@
 ---
-- name: Set image tag for cleanup
+# Matches both GitHub PR builds (pr-N) and GitLab MR builds (mr-N).
+- name: Set image tags for cleanup
   ansible.builtin.set_fact:
-    _cleanup_tag: "{{ image_tag_prefix }}-{{ _cleanup_pr }}"
+    _cleanup_tag_regex: ":({{ image_tag_prefix }}|{{ mr_image_tag_prefix | default('mr') }})-{{ _cleanup_pr }}$"
 
-- name: Find images with PR tag
+- name: Find images with PR or MR tag
   ansible.builtin.shell: |
-    {{ engine }} images --format '{%raw%}{{.Repository}}:{{.Tag}}{%endraw%}' | grep ":{{ _cleanup_tag }}" || true
+    {{ engine }} images --format '{%raw%}{{.Repository}}:{{.Tag}}{%endraw%}' | grep -E '{{ _cleanup_tag_regex }}' || true
   changed_when: false
   register: _pr_images
 

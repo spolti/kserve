@@ -3,6 +3,10 @@
 #
 # Usage:
 #   ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1234
+#   ansible-playbook deploy-pr.yml -e pr_url=https://gitlab.com/group/kserve/-/merge_requests/42
+#
+# The source (GitHub PR or GitLab MR) is detected from pr_url. GitLab access is
+# anonymous unless GITLAB_TOKEN is set (read_api + read_repository).
 #
 # Options:
 #   -e cluster_type=kind|minikube|crc|openshift
@@ -13,6 +17,8 @@
 #   -e auto_detect_components=false    (disable auto-detection, use manual config)
 #   -e models_to_deploy='["sklearn-iris","xgboost-iris"]'
 #   -e deploy_canary_model=true          (add sklearn canary ISVC with canary revisions)
+#   -e run_ssrf_tests=true               (run HTTP(S) storageUri SSRF admission/runtime checks)
+#   -e gitlab_validate_certs=false       (GitLab with an untrusted corporate CA; or set gitlab_ca_path)
 #
 - name: KServe PR Local Test
   hosts: localhost
@@ -27,6 +33,7 @@
         fail_msg: |
           pr_url is required. Usage:
             ansible-playbook deploy-pr.yml -e pr_url=https://github.com/kserve/kserve/pull/1234
+            ansible-playbook deploy-pr.yml -e pr_url=https://HOST/GROUP/PROJECT/-/merge_requests/NUMBER
 
     - name: Auto-detect container engine
       when: engine == 'auto'
@@ -67,7 +74,8 @@
           Auto-detect:     {{ 'enabled' if auto_detect_components | default(true) | bool else 'disabled' }}
           Security scan:   {{ 'skip' if skip_security_scan | bool else 'enabled' }}
           Canary model:    {{ 'enabled' if deploy_canary_model | default(false) | bool else 'disabled' }}
-          Copilot review:  {{ 'enabled' if enable_copilot_review | bool else 'disabled' }}
+          Copilot review:  {{ 'enabled' if enable_copilot_review | bool else 'disabled' }} (GitHub only)
+          SSRF tests:      {{ 'enabled' if run_ssrf_tests | default(false) | bool else 'disabled' }}
           ========================================
 
     - name: Append canary model to deploy list

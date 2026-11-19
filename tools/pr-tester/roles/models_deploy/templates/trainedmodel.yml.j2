@@ -1,0 +1,17 @@
+apiVersion: serving.kserve.io/v1alpha1
+kind: TrainedModel
+metadata:
+  name: {{ trained_model.name }}
+  namespace: {{ trained_model.namespace | default(test_namespace) }}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/pr: "{{ pr_number }}"
+{% for k, v in (trained_model.labels | default({})).items() %}
+    {{ k }}: "{{ v }}"
+{% endfor %}
+spec:
+  inferenceService: {{ trained_model.isvc }}
+  model:
+    framework: {{ trained_model.framework | default('sklearn') }}
+    memory: {{ trained_model.memory | default('128Mi') }}
+    storageUri: "{{ trained_model.storage_uri }}"

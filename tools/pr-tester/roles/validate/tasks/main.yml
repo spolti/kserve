@@ -98,6 +98,12 @@
     loop_var: model_key
   when: run_inference_test | bool
 
+- name: Run HTTP(S) storageUri SSRF checks
+  ansible.builtin.include_tasks: ssrf_test.yml
+  when:
+    - run_ssrf_tests | bool
+    - "'kserve' in kserve_install_types"
+
 - name: Get cluster resource summary
   ansible.builtin.command: kubectl get all -n {{ test_namespace }}
   changed_when: false
@@ -110,7 +116,7 @@
         VALIDATION COMPLETE
       ========================================
 
-      PR #{{ pr_number }} deployed on {{ cluster_type }}
+      {{ 'MR !' if pr_source | default('github') == 'gitlab' else 'PR #' }}{{ pr_number }} deployed on {{ cluster_type }}
       Install types: {{ kserve_install_types | join(', ') }}
       Models deployed: {{ models_to_deploy | join(', ') }}
       Test namespace: {{ test_namespace }}

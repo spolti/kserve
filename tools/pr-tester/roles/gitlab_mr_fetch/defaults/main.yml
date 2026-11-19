@@ -1,0 +1,20 @@
+pr_url: ""
+sandbox_base: /tmp/kserve-pr-sandbox
+
+# Image tag prefix for merge request builds, e.g. mr-4699
+mr_image_tag_prefix: "mr"
+
+# Optional token for private projects or comment-restricted APIs.
+# Read from GITLAB_TOKEN (personal/project access token with read_api +
+# read_repository). Anonymous access is used when it is empty.
+gitlab_token: "{{ lookup('env', 'GITLAB_TOKEN') }}"
+
+# API calls (curl) and clones (git) use the system trust store. If the
+# GitLab CA is not in it, point gitlab_ca_path at the CA bundle, or set
+# gitlab_validate_certs=false as a last resort.
+gitlab_validate_certs: true
+gitlab_ca_path: ""
+
+# History depth for the target branch and merge request head. The role
+# deepens automatically when the merge base is not reachable.
+gitlab_fetch_depth: 50

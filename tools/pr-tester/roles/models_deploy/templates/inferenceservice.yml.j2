@@ -9,7 +9,10 @@ metadata:
 spec:
   predictor:
     {{ model.runtime }}:
+{# No storageUri makes it a multi-model predictor with the agent puller. #}
+{% if model.storage_uri is defined %}
       storageUri: "{{ model.storage_uri }}"
+{% endif %}
 {% if model.protocol_version is defined %}
       protocolVersion: {{ model.protocol_version }}
 {% endif %}
