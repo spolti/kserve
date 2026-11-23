@@ -3,7 +3,8 @@
 # Gateway API, cert-manager, LWS, Envoy Gateway, KServe controllers, ClusterServingRuntimes.
 
 - name: Deploy KServe via make deploy-dev
-  ansible.builtin.command: make deploy-dev
+  ansible.builtin.command: >-
+    {{ role_path }}/../../scripts/live-run.sh --label "make deploy-dev" -- make deploy-dev
   args:
     chdir: "{{ source_dir }}"
   environment:

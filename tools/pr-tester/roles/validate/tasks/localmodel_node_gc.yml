@@ -1,0 +1,53 @@
+---
+# LocalModelNode garbage collection on node deletion (kserve/kserve#6159).
+#
+# When a Kubernetes node is deleted, the localmodel controller must delete the
+# node's LocalModelNode, and with it the download Jobs it owns, while leaving
+# other nodes' LocalModelNodes alone.
+#
+# The checks use fake Node objects (no kubelet), so they work on any cluster,
+# including single-node minikube and shared OpenShift, without removing real
+# nodes. What the controller reacts to is the Node object being deleted.
+#
+# On a build without the fix, every "removed" check fails (the orphan stays).
+
+- name: LMN GC | initialize results
+  ansible.builtin.set_fact:
+    _lmn_results: []
+
+- name: LMN GC | ensure test namespace exists
+  ansible.builtin.shell: |
+    kubectl create namespace {{ test_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+  changed_when: false
+
+- name: LMN GC | run scenarios
+  ansible.builtin.include_tasks: localmodel_node_gc_scenario.yml
+  # Set enabled: false on a scenario to skip it.
+  loop: "{{ lmn_gc_scenarios | selectattr('enabled') | list }}"
+  loop_control:
+    loop_var: lmn_case
+    label: "{{ lmn_case.id }}"
+
+- name: LMN GC | summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+        LOCALMODELNODE GC CHECKS ({{ pr_source | default('github') }} #{{ pr_number }})
+      ========================================
+      {% for r in _lmn_results %}
+      [{{ r.result }}] {{ r.check }}
+      {% if r.result != 'PASS' %}
+             {{ r.detail }}
+      {% endif %}
+      {% endfor %}
+      ----------------------------------------
+      {{ _lmn_results | selectattr('result', 'equalto', 'PASS') | list | length }} passed,
+      {{ _lmn_results | selectattr('result', 'equalto', 'FAIL') | list | length }} failed
+      ========================================
+
+- name: LMN GC | fail if any check failed
+  ansible.builtin.fail:
+    msg: >-
+      {{ _lmn_results | selectattr('result', 'equalto', 'FAIL') | list | length }}
+      LocalModelNode GC check(s) failed. See the summary above.
+  when: _lmn_results | selectattr('result', 'equalto', 'FAIL') | list | length > 0

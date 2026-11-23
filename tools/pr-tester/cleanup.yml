@@ -12,6 +12,9 @@
 - name: KServe PR Test Cleanup
   hosts: localhost
   gather_facts: true
+  # Read by scripts/live-run.sh
+  environment:
+    LIVE_OUTPUT: "{{ '1' if live_output | default(true) | bool else '0' }}"
 
   pre_tasks:
     - name: Validate required variables

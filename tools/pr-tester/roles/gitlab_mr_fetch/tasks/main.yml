@@ -93,10 +93,13 @@
   ansible.builtin.set_fact:
     source_dir: "{{ sandbox_dir }}/{{ pr_repo }}"
 
+# Only the current target branch and the MR head, each at depth 1. No
+# history: the changed files and the diff come from the GitLab API below.
 - name: Clone target branch into sandbox
   ansible.builtin.command:
     cmd: >-
-      git clone --depth={{ gitlab_fetch_depth }} --single-branch
+      {{ role_path }}/../../scripts/live-run.sh --label "Cloning {{ gitlab_project_path }} {{ pr_base_branch }} (depth 1)" --
+      git clone --progress --depth=1 --single-branch
       --branch {{ pr_base_branch }}
       https://{{ gitlab_host }}/{{ gitlab_project_path }}.git
       {{ source_dir }}
@@ -109,7 +112,8 @@
 - name: Fetch merge request head
   ansible.builtin.command:
     cmd: >-
-      git fetch --depth={{ gitlab_fetch_depth }} origin
+      {{ role_path }}/../../scripts/live-run.sh --label "Fetching MR !{{ pr_number }} head (depth 1)" --
+      git fetch --progress --depth=1 origin
       +refs/merge-requests/{{ pr_number }}/head:refs/remotes/origin/merge-requests/{{ pr_number }}
   args:
     chdir: "{{ source_dir }}"
@@ -142,27 +146,39 @@
   ansible.builtin.set_fact:
     pr_head_sha: "{{ _mr_checked_out.stdout | trim }}"
 
-# pr_analyze diffs origin/<target>...HEAD, which needs the merge base.
-- name: Check merge base is reachable
-  ansible.builtin.command:
-    cmd: git merge-base origin/{{ pr_base_branch }} HEAD
+# pr_analyze and security_scan use these instead of a git diff, which would
+# need the merge base and therefore history.
+- name: Get MR changed files and diff from GitLab
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl --silent --show-error --fail --max-time 60 -H @- \
+      {{ '--insecure' if not (gitlab_validate_certs | bool) else '' }} \
+      {{ ('--cacert ' ~ gitlab_ca_path) if gitlab_ca_path | length > 0 else '' }} \
+      '{{ _gitlab_api }}/merge_requests/{{ pr_number }}/changes?access_raw_diffs=true' \
+    | python3 -I -c '
+    import json, sys
+    out_dir = sys.argv[1]
+    changes = json.load(sys.stdin).get("changes", [])
+    with open(out_dir + "/changed-files.txt", "w") as names, open(out_dir + "/change.diff", "w") as diff:
+        for c in changes:
+            names.write(c["new_path"] + "\n")
+            if c["old_path"] != c["new_path"]:
+                names.write(c["old_path"] + "\n")
+            diff.write("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n%s" % (
+                c["old_path"], c["new_path"], c["old_path"], c["new_path"], c["diff"]))
+    print(len(changes))
+    ' {{ sandbox_dir }}
   args:
-    chdir: "{{ source_dir }}"
-  register: _mr_merge_base
+    executable: /bin/bash
+    stdin: "{{ ('PRIVATE-TOKEN: ' ~ gitlab_token) if gitlab_token | length > 0 else '' }}"
+  register: _mr_changes
   changed_when: false
-  failed_when: false
+  no_log: "{{ gitlab_token | length > 0 }}"
 
-- name: Deepen history until the merge base is reachable
-  ansible.builtin.command:
-    cmd: >-
-      git fetch --unshallow origin
-      +refs/heads/{{ pr_base_branch }}:refs/remotes/origin/{{ pr_base_branch }}
-      +refs/merge-requests/{{ pr_number }}/head:refs/remotes/origin/merge-requests/{{ pr_number }}
-  args:
-    chdir: "{{ source_dir }}"
-  environment: "{{ _git_env | combine(_git_ssl_env) }}"
-  changed_when: true
-  when: _mr_merge_base.rc != 0
+- name: Set change facts
+  ansible.builtin.set_fact:
+    pr_changed_files: "{{ lookup('file', sandbox_dir ~ '/changed-files.txt').splitlines() | select | unique | list }}"
+    pr_diff_file: "{{ sandbox_dir }}/change.diff"
 
 - name: MR fetch complete
   ansible.builtin.debug:

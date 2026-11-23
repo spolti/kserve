@@ -78,7 +78,7 @@ cd tools/pr-tester
 
 # When done, clean up everything
 ./pr-test.sh cleanup 1234
-```
+
 
 ## Usage
 
@@ -123,6 +123,7 @@ The GitLab path is read-only: it never comments on, approves or pushes to the MR
 | `--canary` | `-e deploy_canary_model=true` | `false` | Deploy the canary example InferenceService (sklearn with multiple canary revisions) |
 | `--models LIST` | `-e '{"models_to_deploy": [...]}'` | `sklearn-iris` | Models to deploy |
 | `--ssrf-tests` | `-e run_ssrf_tests=true` | `false` | Run the HTTP(S) storageUri SSRF checks (see [SSRF checks](#ssrf-checks)) |
+| `--localmodel-node-gc-tests` | `-e run_localmodel_node_gc_tests=true` | `false` | Run the LocalModelNode GC on node deletion checks (see [LocalModelNode GC checks](#localmodelnode-gc-checks)) |
 
 ### Examples
 
@@ -146,6 +147,17 @@ The GitLab path is read-only: it never comments on, approves or pushes to the MR
 ./pr-test.sh cleanup 1234 --keep-cluster
 ```
 
+### Live output
+
+Long-running steps stream their output to the terminal while they run, indented under the Ansible task, instead of staying silent until the task ends:
+
+- image builds (the full log is also kept in `build-<image>.log`), image loads and pushes
+- `minikube start` and addons, `kind create cluster`, `crc start`
+- `hack/kserve-install.sh`, `make deploy-dev`, controller image patches and rollouts, uninstall
+- **workload readiness** (`scripts/watch-workload.sh`): while an InferenceService or LLMInferenceService becomes Ready, it shows not-ready conditions, pod and container states (init containers included), new events, and live logs of every container (`storage-initializer`, `kserve-container`, `agent`, ...). On timeout it prints the conditions and a `kubectl describe` tail of each pod.
+
+Ansible runs tasks detached from the terminal, so `scripts/live-run.sh` and `scripts/watch-workload.sh` write to the terminal of the `ansible-playbook` process (override with `PR_TESTER_TTY=/dev/ttysNNN`). Without a terminal (CI) they fall back to captured output. Turn it off with `--no-live` (`-e live_output=false`).
+
 ## Pipeline Flow
 
 When you run `./pr-test.sh deploy <PR_URL>`, the automation executes 9 stages in sequence. Each stage is an Ansible role, and each one feeds facts/variables into the next.
@@ -159,31 +171,32 @@ PR URL
 
 ### 1. PR Fetch
 
-Parses the PR URL, creates an isolated sandbox, clones the repo, and checks out the PR branch. `pr_fetch` detects the source from the URL and either runs its GitHub tasks or hands off to the `gitlab_mr_fetch` role.
+Parses the PR URL, creates an isolated sandbox, and fetches only two commits: the current base branch and the PR head, each at depth 1 (no history). The changed files and the diff come from the GitHub/GitLab API and are saved as `changed-files.txt` and `change.diff` in the sandbox. `pr_fetch` detects the source from the URL and either runs its GitHub tasks or hands off to the `gitlab_mr_fetch` role.
 
 **GitLab merge requests** (`gitlab_mr_fetch`):
 
 - Reads the target branch, head SHA and state from the GitLab API
-- Clones the target branch into `/tmp/kserve-pr-sandbox/mr-<NUMBER>-<TIMESTAMP>/` and checks out `refs/merge-requests/<NUMBER>/head`, which also covers MRs from forks
-- Warns when the MR is not open or moved after the API call, and deepens the shallow clone when the merge base is not reachable
+- Clones the target branch at depth 1 into `/tmp/kserve-pr-sandbox/mr-<NUMBER>-<TIMESTAMP>/` and checks out `refs/merge-requests/<NUMBER>/head` at depth 1, which also covers MRs from forks
+- Gets the changed files and diff from the MR changes API
+- Warns when the MR is not open or moved after the API call
 - Tags images `mr-<NUMBER>`
 
 **GitHub pull requests:**
 
 - Validates the URL format (`https://github.com/OWNER/REPO/pull/NUMBER`)
 - Verifies the `gh` CLI is installed and authenticated
-- Clones the repository into `/tmp/kserve-pr-sandbox/pr-<NUMBER>-<TIMESTAMP>/`
-- Runs `gh pr checkout` to get the PR branch
-- Resolves the base branch (e.g. `master` or `main`) and fetches it for diff comparison
+- Resolves the base branch (e.g. `master` or `main`) and clones it at depth 1 into `/tmp/kserve-pr-sandbox/pr-<NUMBER>-<TIMESTAMP>/`
+- Fetches `refs/pull/<NUMBER>/head` at depth 1 and checks it out (works for fork PRs too)
+- Gets the changed files and diff with `gh pr diff`
 - Optionally posts a `@copilot review this PR for security and correctness` comment on the GitHub PR via `gh pr review --comment` (if `--copilot` is passed). This triggers GitHub Copilot's asynchronous code review on the remote PR — it is **not** a local review. Requires the repository to have GitHub Copilot code review enabled.
 
-**Produces:** `pr_source` (`github` or `gitlab`), `source_dir`, `pr_number`, `pr_base_branch`, `pr_image_tag`; GitLab also sets `pr_head_sha`, `pr_title`, `pr_web_url`
+**Produces:** `pr_source` (`github` or `gitlab`), `source_dir`, `pr_number`, `pr_base_branch`, `pr_image_tag`, `pr_head_sha`, `pr_changed_files`, `pr_diff_file`; GitLab also sets `pr_title`, `pr_web_url`
 
 ### 2. PR Analyze
 
 Determines what to build, deploy, and test based on which files the PR changes.
 
-- Runs `git diff --name-only` against the base branch to get the list of changed files
+- Uses the changed files from `pr_fetch` (GitHub/GitLab API)
 - Matches each file path against component detection rules (regex patterns mapped to KServe subsystems)
 - Sets the install types (e.g. `kserve`, `llmisvc`, `localmodel`), images to build, and test models
 - Falls back to `kserve` if no specific component is detected
@@ -197,7 +210,7 @@ See [Auto-detection](#auto-detection) below for the full mapping table.
 
 Static analysis gate that scans the PR diff for suspicious patterns before building anything.
 
-- Runs `scripts/security-scan.sh` against the diff between the PR and base branch
+- Runs `scripts/security-scan.sh` on the PR's diff from the GitHub/GitLab API (`change.diff`)
 - Checks for: base64 blobs (with `+`/`/`/`=`), AWS credentials, hardcoded secrets/tokens, private keys, shell injection (`eval`, `curl|sh`), binary files, cryptocurrency addresses, and LLM prompt injection patterns
 - **Fails the pipeline** if any findings are detected (review output and re-run with `--skip-scan` if benign)
 - Skipped when `--skip-scan` is passed
@@ -359,6 +372,32 @@ ansible-playbook deploy-pr.yml -e pr_url=... -e '{"models_to_deploy": ["sklearn-
 Checks 8–12 reuse `sklearn-mms` (deployed if the run did not already include it) and the shared TrainedModel task. Tunables live in `roles/validate/defaults/main.yml` (`ssrf_blocked_uris`, `ssrf_allowed_uris`, `ssrf_redirect_uri`, `ssrf_public_https_model_uri`, `ssrf_test_storage_uris`, `ssrf_test_agent`, `ssrf_cleanup`, ...).
 
 Checks 5, 6 and 9–11 need public DNS (`nip.io`) and egress from the cluster; check 6 and 11 call `httpbin.org` (set `-e ssrf_redirect_uri=""` to skip). If DNS fails inside the pod, check 5 reports INCONCLUSIVE instead of passing.
+
+## LocalModelNode GC checks
+
+Checks that deleting a Kubernetes node removes its `LocalModelNode` and the download Jobs it owns, and leaves other nodes' `LocalModelNode`s alone ([kserve#6159](https://github.com/kserve/kserve/issues/6159)). They run only when requested with `--localmodel-node-gc-tests` (`-e run_localmodel_node_gc_tests=true`), and only when the localmodel controller is installed, which `pr_analyze` does for PRs that touch LocalModel code.
+
+```bash
+./pr-test.sh deploy https://github.com/kserve/kserve/pull/1234 --cluster minikube --localmodel-node-gc-tests
+```
+
+The checks create **fake Node objects** (no kubelet), so they run on any cluster, including single-node minikube and shared OpenShift, without removing real nodes; the controller reacts to the Node object being deleted. The fake nodes are cordoned and tainted so real workloads never land on them. Each scenario uses two of them: `gone`, which is deleted, and `keep`, the negative control.
+
+| Scenario | Setup |
+|----------|-------|
+| a | `LocalModelCache`, one node group selecting both nodes |
+| b | `LocalModelCache` with two node groups; only the second selects the deleted node |
+| c | `LocalModelNamespaceCache`, one node group selecting both nodes |
+
+For each scenario, after the `gone` node's `LocalModelNode` appears, a Job controller-owned by it and bound to that node is created (its pod stays Pending, as in the issue). Then the node is deleted and the checks assert:
+
+1. the deleted node's `LocalModelNode` is removed;
+2. its Job is removed (Kubernetes garbage collection through the owner reference, the same reference real download Jobs carry);
+3. the `keep` node's `LocalModelNode` is still there.
+
+The fake nodes have no localmodel agent, so the agent never creates real download Jobs for them; the owned Job stands in for one. On a build without the fix, checks 1 and 2 fail in every scenario. Scenario b can pass on such a build only if some unrelated reconcile of that cache happens to run the cleanup.
+
+Tunables in `roles/validate/defaults/main.yml`: `lmn_gc_timeout`, `lmn_gc_cleanup`, `lmn_gc_storage_class`, `lmn_gc_scenarios` (set `enabled: false` on one to skip it). Creating Node objects needs cluster-admin.
 
 ## Available Images
 

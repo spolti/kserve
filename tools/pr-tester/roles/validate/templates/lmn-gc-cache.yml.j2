@@ -1,0 +1,18 @@
+{# LocalModelCache (cluster-scoped) or LocalModelNamespaceCache (namespaced). #}
+apiVersion: serving.kserve.io/v1alpha1
+kind: {{ lmn_case.cache_kind }}
+metadata:
+  name: {{ lmn_cache }}
+{% if lmn_case.cache_kind == 'LocalModelNamespaceCache' %}
+  namespace: {{ test_namespace }}
+{% endif %}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/check: localmodel-node-gc
+spec:
+  modelSize: 10Mi
+  sourceModelUri: "{{ lmn_gc_source_model_uri }}"
+  nodeGroups:
+{% for group in lmn_groups %}
+    - {{ group.name }}
+{% endfor %}

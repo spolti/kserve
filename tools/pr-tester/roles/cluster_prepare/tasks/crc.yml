@@ -10,7 +10,8 @@
   register: _crc_status
 
 - name: Start CRC cluster
-  ansible.builtin.command: crc start
+  ansible.builtin.command: >-
+    {{ role_path }}/../../scripts/live-run.sh --label "Starting CRC" -- crc start
   when: _crc_status.rc != 0 or '"Running"' not in _crc_status.stdout
   timeout: 1200
 

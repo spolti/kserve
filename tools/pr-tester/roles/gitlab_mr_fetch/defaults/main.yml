@@ -14,7 +14,3 @@ gitlab_token: "{{ lookup('env', 'GITLAB_TOKEN') }}"
 # gitlab_validate_certs=false as a last resort.
 gitlab_validate_certs: true
 gitlab_ca_path: ""
-
-# History depth for the target branch and merge request head. The role
-# deepens automatically when the merge base is not reachable.
-gitlab_fetch_depth: 50

@@ -83,6 +83,11 @@ Deploy options:
   --no-auto-detect    Disable auto-detection, use manual images/models config
   --canary            Deploy the canary example InferenceService (sklearn with canary revisions)
   --ssrf-tests        Run the HTTP(S) storageUri SSRF admission and storage-initializer checks
+  --no-live           Do not stream builds, installs, rollouts and pod logs live
+                      (output is still shown when a step fails)
+  --localmodel-node-gc-tests
+                      Run the LocalModelNode garbage-collection-on-node-deletion checks
+                      (needs the localmodel install, which LocalModel PRs get automatically)
   --models LIST       Comma-separated models: sklearn-iris,xgboost-iris,lightgbm-iris,sklearn-canary,sklearn-mms,llmisvc-opt-125m
                       (sklearn-mms: multi-model ISVC whose TrainedModels load through the agent puller;
                        override them with -e '{"mms_trained_models": [...]}' when calling ansible-playbook)
@@ -150,6 +155,10 @@ cmd_deploy() {
                 extra_args+=(-e "deploy_canary_model=true"); shift ;;
             --ssrf-tests)
                 extra_args+=(-e "run_ssrf_tests=true"); shift ;;
+            --localmodel-node-gc-tests)
+                extra_args+=(-e "run_localmodel_node_gc_tests=true"); shift ;;
+            --no-live)
+                extra_args+=(-e "live_output=false"); shift ;;
             --models)
                 local models_json
                 models_json=$(echo "$2" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip().split(',')))")

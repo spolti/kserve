@@ -21,6 +21,43 @@
         Registry: {{ ko_docker_repo }}
         Tag: {{ pr_image_tag }}
 
+# A partial uninstall can leave KServe webhook configurations pointing at a
+# service in a namespace that no longer exists. The API server then rejects
+# every object those webhooks cover, so the reinstall fails. They are broken
+# anyway and the install recreates them.
+- name: Find stale KServe webhook configurations
+  ansible.builtin.shell: |
+    set -o pipefail
+    existing=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')
+    kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o json \
+      | python3 -I -c '
+    import json, sys
+    namespaces = set(sys.argv[1].split())
+    for item in json.load(sys.stdin)["items"]:
+        name = item["metadata"]["name"]
+        if "kserve" not in name:
+            continue
+        targets = {w.get("clientConfig", {}).get("service", {}).get("namespace")
+                   for w in item.get("webhooks") or []}
+        if any(t and t not in namespaces for t in targets):
+            kind = "mutatingwebhookconfiguration" if item["kind"].startswith("Mutating") \
+                   else "validatingwebhookconfiguration"
+            print(f"{kind}/{name}")
+    ' "$existing"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: _stale_webhooks
+
+- name: Remove stale KServe webhook configurations
+  ansible.builtin.command:
+    argv: >-
+      {{ [role_path ~ '/../../scripts/live-run.sh', '--label',
+          'Removing ' ~ (_stale_webhooks.stdout_lines | length) ~ ' stale KServe webhook configuration(s) whose service namespace no longer exists',
+          '--', 'kubectl', 'delete', '--ignore-not-found'] + _stale_webhooks.stdout_lines }}
+  changed_when: true
+  when: _stale_webhooks.stdout_lines | length > 0
+
 - name: Determine deploy strategy
   ansible.builtin.set_fact:
     _use_make_deploy_dev: "{{ cluster_type == 'kind' and kserve_install_types | sort == ['kserve', 'llmisvc', 'localmodel'] | sort }}"
@@ -35,6 +72,7 @@
 
 - name: Wait for KServe controller rollout
   ansible.builtin.command: >-
+    {{ role_path }}/../../scripts/live-run.sh --label "Rolling out kserve-controller-manager" --
     kubectl rollout status deployment/kserve-controller-manager
     -n {{ kserve_namespace }}
     --timeout={{ deploy_timeout }}s
@@ -43,6 +81,7 @@
 
 - name: Wait for LocalModel controller rollout (if deployed)
   ansible.builtin.command: >-
+    {{ role_path }}/../../scripts/live-run.sh --label "Rolling out kserve-localmodel-controller-manager" --
     kubectl rollout status deployment/kserve-localmodel-controller-manager
     -n {{ kserve_namespace }}
     --timeout={{ deploy_timeout }}s
@@ -52,6 +91,7 @@
 
 - name: Wait for LLMISvc controller rollout (if deployed)
   ansible.builtin.command: >-
+    {{ role_path }}/../../scripts/live-run.sh --label "Rolling out llmisvc-controller-manager" --
     kubectl rollout status deployment/llmisvc-controller-manager
     -n {{ kserve_namespace }}
     --timeout={{ deploy_timeout }}s

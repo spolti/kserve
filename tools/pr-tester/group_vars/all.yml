@@ -84,3 +84,8 @@ isvc_ready_timeout: 300
 
 # Image tag prefix for PR builds
 image_tag_prefix: "pr"
+
+# Stream long-running steps (image builds, cluster start, installs, rollouts,
+# workload readiness with pod logs) live to the terminal. Falls back to
+# captured output when there is no terminal (CI). pr-test.sh --no-live turns it off.
+live_output: true

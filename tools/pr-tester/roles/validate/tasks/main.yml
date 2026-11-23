@@ -104,6 +104,12 @@
     - run_ssrf_tests | bool
     - "'kserve' in kserve_install_types"
 
+- name: Run LocalModelNode GC checks
+  ansible.builtin.include_tasks: localmodel_node_gc.yml
+  when:
+    - run_localmodel_node_gc_tests | bool
+    - "'localmodel' in kserve_install_types"
+
 - name: Get cluster resource summary
   ansible.builtin.command: kubectl get all -n {{ test_namespace }}
   changed_when: false

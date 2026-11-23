@@ -1,25 +1,76 @@
 ---
-- name: Check if source_dir is set (from deploy run)
+# cleanup.yml runs as its own playbook, so source_dir from the deploy run is
+# not set. Find the PR/MR sandbox (removed later by this role) so the
+# project's own uninstall runs.
+- name: Find the sandbox of this PR/MR
+  ansible.builtin.find:
+    paths: "{{ sandbox_base }}"
+    patterns:
+      - "pr-{{ _cleanup_pr }}-*"
+      - "mr-{{ _cleanup_pr }}-*"
+    file_type: directory
+  register: _uninstall_sandboxes
+  when: source_dir is not defined or source_dir | length == 0
+
+- name: Find kserve-install.sh in the sandbox
+  ansible.builtin.find:
+    paths: "{{ (_uninstall_sandboxes.files | sort(attribute='mtime') | last).path }}"
+    patterns: kserve-install.sh
+    recurse: true
+    depth: 3
+  register: _uninstall_script
+  when:
+    - _uninstall_sandboxes is not skipped
+    - _uninstall_sandboxes.files | length > 0
+
+- name: Set source directory for uninstall
   ansible.builtin.set_fact:
-    _has_source: "{{ source_dir is defined and source_dir | length > 0 }}"
+    _uninstall_source: >-
+      {{ source_dir if (source_dir is defined and source_dir | length > 0)
+         else ((_uninstall_script.files | first).path | dirname | dirname)
+              if (_uninstall_script is defined and _uninstall_script is not skipped and _uninstall_script.files | length > 0)
+         else '' }}
 
 - name: Uninstall via kserve-install.sh
-  ansible.builtin.command: "{{ source_dir }}/hack/kserve-install.sh --uninstall"
+  ansible.builtin.command: >-
+    {{ role_path }}/../../scripts/live-run.sh --label "Uninstalling KServe" --
+    {{ _uninstall_source }}/hack/kserve-install.sh --uninstall
   args:
-    chdir: "{{ source_dir }}"
-  when: _has_source | bool
+    chdir: "{{ _uninstall_source }}"
+  when: _uninstall_source | length > 0
+  register: _uninstall_script_run
   failed_when: false
   changed_when: true
 
+# Runs when there is no sandbox or the uninstall script failed. Also removes
+# the cluster-scoped objects (webhook configurations, cluster-scoped CRs,
+# CRDs) that deleting the namespace leaves behind. Stale webhook
+# configurations would make the next install fail.
 - name: Uninstall via kubectl (fallback)
-  when: not (_has_source | bool)
-  block:
-    - name: Delete KServe CRDs
-      ansible.builtin.command: kubectl delete crd --selector=app.kubernetes.io/part-of=kserve
-      failed_when: false
-      changed_when: true
-
-    - name: Delete kserve namespace
-      ansible.builtin.command: kubectl delete namespace {{ kserve_namespace }} --ignore-not-found
-      failed_when: false
-      changed_when: true
+  when: _uninstall_source | length == 0 or (_uninstall_script_run.rc | default(0)) != 0
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/../../scripts/live-run.sh"
+      - --label
+      - "Removing KServe resources with kubectl"
+      - --
+      - bash
+      - -c
+      - |
+        set -u
+        echo "webhook configurations:"
+        kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name \
+          | grep -E 'kserve' | xargs -r kubectl delete --ignore-not-found
+        echo "cluster-scoped KServe resources:"
+        for kind in clusterservingruntimes clusterstoragecontainers localmodelcaches localmodelnodegroups localmodelnodes; do
+          kubectl get "$kind" -o name 2>/dev/null | xargs -r kubectl delete --ignore-not-found --wait=false
+        done
+        echo "namespace {{ kserve_namespace }}:"
+        kubectl delete namespace {{ kserve_namespace }} --ignore-not-found --wait=true --timeout=180s
+        echo "CRDs:"
+        kubectl get crd -o name | grep -E '\.serving\.kserve\.io$' | xargs -r kubectl delete --ignore-not-found --timeout=120s
+        echo "cluster roles and bindings:"
+        kubectl get clusterrole,clusterrolebinding -o name | grep -E 'kserve' | xargs -r kubectl delete --ignore-not-found
+        true
+  failed_when: false
+  changed_when: true

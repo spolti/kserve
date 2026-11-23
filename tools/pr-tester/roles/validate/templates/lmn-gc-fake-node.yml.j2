@@ -1,0 +1,21 @@
+{# A Node object with no kubelet behind it. Cordoned and tainted so real
+   workloads never land on it; the localmodel controller only looks at
+   readiness and the node group's PV node affinity. #}
+apiVersion: v1
+kind: Node
+metadata:
+  name: {{ lmn_node }}
+  labels:
+    kubernetes.io/hostname: {{ lmn_node }}
+    kubernetes.io/os: linux
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/check: localmodel-node-gc
+spec:
+  unschedulable: true
+  taints:
+    - key: kserve-pr-tester/fake-node
+      value: "true"
+      effect: NoSchedule
+    - key: kserve-pr-tester/fake-node
+      value: "true"
+      effect: NoExecute

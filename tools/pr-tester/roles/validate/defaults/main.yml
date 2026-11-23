@@ -59,3 +59,37 @@ ssrf_runtime_timeout: 300
 ssrf_test_agent: true
 ssrf_mms_model_key: sklearn-mms
 ssrf_mms_isvc_name: "{{ _model_definitions[ssrf_mms_model_key].name }}"
+
+# ---------------------------------------------------------------------------
+# LocalModelNode GC on node deletion (localmodel_node_gc.yml). Opt-in only:
+# -e run_localmodel_node_gc_tests=true (pr-test.sh --localmodel-node-gc-tests).
+# ---------------------------------------------------------------------------
+run_localmodel_node_gc_tests: false
+
+# Seconds to wait for LocalModelNodes to appear and to be garbage-collected.
+lmn_gc_timeout: 120
+
+# Delete the fake nodes, node groups, caches and Jobs after each scenario.
+lmn_gc_cleanup: true
+
+# Never downloaded: the fake nodes have no localmodel agent.
+lmn_gc_source_model_uri: "gs://kfserving-examples/models/sklearn/1.0/model"
+lmn_gc_storage_class: standard
+
+# Set enabled: false to skip a scenario.
+lmn_gc_scenarios:
+  - id: a
+    title: LocalModelCache
+    cache_kind: LocalModelCache
+    multi_group: false
+    enabled: true
+  - id: b
+    title: LocalModelCache, node matched by its second node group
+    cache_kind: LocalModelCache
+    multi_group: true
+    enabled: true
+  - id: c
+    title: LocalModelNamespaceCache
+    cache_kind: LocalModelNamespaceCache
+    multi_group: false
+    enabled: true

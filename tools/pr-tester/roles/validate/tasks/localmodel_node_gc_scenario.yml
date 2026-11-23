@@ -1,0 +1,192 @@
+---
+# One isolated LocalModelNode garbage-collection scenario.
+# Expects: lmn_case (id, cache_kind, multi_group, title)
+#
+# Two fake nodes: "gone" is deleted, "keep" survives as the negative control.
+# Single group: one node group selects both nodes.
+# Multi group:  the first group selects "keep", the second selects "gone",
+#               so only a non-first group matches the deleted node.
+
+- name: "LMN GC [{{ lmn_case.id }}] | set names"
+  ansible.builtin.set_fact:
+    lmn_gone: "lmn-gc-{{ lmn_case.id }}-gone"
+    lmn_keep: "lmn-gc-{{ lmn_case.id }}-keep"
+    lmn_cache: "lmn-gc-{{ lmn_case.id }}"
+    lmn_job: "lmn-gc-{{ lmn_case.id }}-download"
+    lmn_groups: >-
+      {{ [{'name': 'lmn-gc-' ~ lmn_case.id ~ '-ng1', 'hosts': ['lmn-gc-' ~ lmn_case.id ~ '-keep']},
+          {'name': 'lmn-gc-' ~ lmn_case.id ~ '-ng2', 'hosts': ['lmn-gc-' ~ lmn_case.id ~ '-gone']}]
+         if lmn_case.multi_group | default(false) | bool
+         else [{'name': 'lmn-gc-' ~ lmn_case.id ~ '-ng1',
+                'hosts': ['lmn-gc-' ~ lmn_case.id ~ '-gone', 'lmn-gc-' ~ lmn_case.id ~ '-keep']}] }}
+    _lmn_cache_ns_flag: "{{ '-n ' ~ test_namespace if lmn_case.cache_kind == 'LocalModelNamespaceCache' else '' }}"
+    _lmn_retries: "{{ (lmn_gc_timeout | int / 5) | round(0, 'ceil') | int }}"
+
+- name: "LMN GC [{{ lmn_case.id }}] | run scenario"
+  block:
+    # --- fake nodes, Ready ---
+    - name: "LMN GC [{{ lmn_case.id }}] | create fake nodes"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: "{{ lookup('template', 'lmn-gc-fake-node.yml.j2') }}"
+      vars:
+        lmn_node: "{{ item }}"
+      loop: ["{{ lmn_gone }}", "{{ lmn_keep }}"]
+      changed_when: true
+
+    # No kubelet: mark Ready through the status subresource. The controller only
+    # creates LocalModelNodes for Ready nodes. The node-lifecycle controller
+    # flips them to Unknown later, which the controller tolerates (NodeNotReady).
+    - name: "LMN GC [{{ lmn_case.id }}] | mark fake nodes Ready"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - patch
+          - node
+          - "{{ item }}"
+          - --subresource=status
+          - --type=merge
+          - -p
+          - >-
+            {{ {'status': {'conditions': [{
+                 'type': 'Ready', 'status': 'True', 'reason': 'KubeletReady',
+                 'message': 'fake node created by kserve-pr-tester',
+                 'lastHeartbeatTime': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                 'lastTransitionTime': now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')}]}} | to_json }}
+      loop: ["{{ lmn_gone }}", "{{ lmn_keep }}"]
+      changed_when: true
+
+    # --- node groups and cache ---
+    - name: "LMN GC [{{ lmn_case.id }}] | create node groups"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: "{{ lookup('template', 'lmn-gc-nodegroup.yml.j2') }}"
+      vars:
+        lmn_group: "{{ item }}"
+      loop: "{{ lmn_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: true
+
+    - name: "LMN GC [{{ lmn_case.id }}] | create {{ lmn_case.cache_kind }}"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: "{{ lookup('template', 'lmn-gc-cache.yml.j2') }}"
+      changed_when: true
+
+    - name: "LMN GC [{{ lmn_case.id }}] | wait for both LocalModelNodes"
+      ansible.builtin.command: kubectl get localmodelnode {{ lmn_gone }} {{ lmn_keep }} -o name
+      register: _lmn_both
+      changed_when: false
+      failed_when: false
+      retries: "{{ _lmn_retries }}"
+      delay: 5
+      until: _lmn_both.rc == 0
+
+    - name: "LMN GC [{{ lmn_case.id }}] | fail setup when LocalModelNodes never appeared"
+      ansible.builtin.fail:
+        msg: >-
+          setup: LocalModelNodes for {{ lmn_gone }}/{{ lmn_keep }} not created within
+          {{ lmn_gc_timeout }}s: {{ _lmn_both.stderr | trim }}
+      when: _lmn_both.rc != 0
+
+    # --- Job owned by the LocalModelNode, Pending on the soon-dead node ---
+    - name: "LMN GC [{{ lmn_case.id }}] | read LocalModelNode uid"
+      ansible.builtin.command: kubectl get localmodelnode {{ lmn_gone }} -o jsonpath='{.metadata.uid}'
+      register: _lmn_uid
+      changed_when: false
+
+    - name: "LMN GC [{{ lmn_case.id }}] | create owned download Job"
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: "{{ lookup('template', 'lmn-gc-job.yml.j2') }}"
+      vars:
+        lmn_gone_uid: "{{ _lmn_uid.stdout | trim }}"
+      changed_when: true
+
+    - name: "LMN GC [{{ lmn_case.id }}] | wait for the Job pod bound to the node"
+      ansible.builtin.command: >-
+        kubectl get pod -n {{ test_namespace }} -l job-name={{ lmn_job }}
+        -o jsonpath='{.items[0].spec.nodeName} {.items[0].status.phase}'
+      register: _lmn_job_pod
+      changed_when: false
+      failed_when: false
+      retries: "{{ _lmn_retries }}"
+      delay: 5
+      until: lmn_gone in _lmn_job_pod.stdout
+
+    # --- the event under test ---
+    - name: "LMN GC [{{ lmn_case.id }}] | delete node {{ lmn_gone }}"
+      ansible.builtin.command: kubectl delete node {{ lmn_gone }} --wait=true
+      changed_when: true
+
+    - name: "LMN GC [{{ lmn_case.id }}] | wait for its LocalModelNode to be deleted"
+      ansible.builtin.command: kubectl get localmodelnode {{ lmn_gone }} -o name
+      register: _lmn_gone_check
+      changed_when: false
+      failed_when: false
+      retries: "{{ _lmn_retries }}"
+      delay: 5
+      until: _lmn_gone_check.rc != 0 and 'NotFound' in _lmn_gone_check.stderr
+
+    - name: "LMN GC [{{ lmn_case.id }}] | wait for its download Job to be deleted"
+      ansible.builtin.command: kubectl get job {{ lmn_job }} -n {{ test_namespace }} -o name
+      register: _lmn_job_check
+      changed_when: false
+      failed_when: false
+      retries: "{{ _lmn_retries }}"
+      delay: 5
+      until: _lmn_job_check.rc != 0 and 'NotFound' in _lmn_job_check.stderr
+
+    - name: "LMN GC [{{ lmn_case.id }}] | check the surviving node's LocalModelNode"
+      ansible.builtin.command: kubectl get localmodelnode {{ lmn_keep }} -o name
+      register: _lmn_keep_check
+      changed_when: false
+      failed_when: false
+
+    - name: "LMN GC [{{ lmn_case.id }}] | record results"
+      vars:
+        _gone_ok: "{{ 'NotFound' in _lmn_gone_check.stderr }}"
+        _job_ok: "{{ 'NotFound' in _lmn_job_check.stderr }}"
+        _keep_ok: "{{ _lmn_keep_check.rc == 0 }}"
+      ansible.builtin.set_fact:
+        _lmn_results: >-
+          {{ _lmn_results + [
+               {'check': lmn_case.title ~ ": deleted node's LocalModelNode is removed",
+                'result': 'PASS' if _gone_ok | bool else 'FAIL',
+                'detail': 'removed' if _gone_ok | bool
+                          else 'still present ' ~ lmn_gc_timeout ~ 's after the node was deleted (orphan)'},
+               {'check': lmn_case.title ~ ': its download Job is removed',
+                'result': 'PASS' if _job_ok | bool else 'FAIL',
+                'detail': 'removed with its LocalModelNode' if _job_ok | bool
+                          else 'still present; pod: ' ~ (_lmn_job_pod.stdout | default('') | trim)},
+               {'check': lmn_case.title ~ ": surviving node's LocalModelNode is kept",
+                'result': 'PASS' if _keep_ok | bool else 'FAIL',
+                'detail': 'kept' if _keep_ok | bool
+                          else 'unexpectedly removed: ' ~ (_lmn_keep_check.stderr | trim)}
+             ] }}
+
+  rescue:
+    - name: "LMN GC [{{ lmn_case.id }}] | record setup failure"
+      ansible.builtin.set_fact:
+        _lmn_results: >-
+          {{ _lmn_results + [{
+               'check': lmn_case.title ~ ': setup',
+               'result': 'FAIL',
+               'detail': ((ansible_failed_result.msg | default(''))
+                          ~ ' ' ~ (ansible_failed_result.stderr | default(''))) | trim | regex_replace('\\s+', ' ') | truncate(300)
+             }] }}
+
+  always:
+    - name: "LMN GC [{{ lmn_case.id }}] | clean up scenario"
+      ansible.builtin.shell: |
+        kubectl delete job {{ lmn_job }} -n {{ test_namespace }} --ignore-not-found --wait=false
+        kubectl delete {{ lmn_case.cache_kind | lower }} {{ lmn_cache }} {{ _lmn_cache_ns_flag }} --ignore-not-found --timeout=60s
+        {% for group in lmn_groups %}
+        kubectl delete localmodelnodegroup {{ group.name }} --ignore-not-found --timeout=60s
+        {% endfor %}
+        kubectl delete node {{ lmn_gone }} {{ lmn_keep }} --ignore-not-found
+        kubectl delete localmodelnode {{ lmn_gone }} {{ lmn_keep }} --ignore-not-found --timeout=60s
+      changed_when: true
+      failed_when: false
+      when: lmn_gc_cleanup | bool

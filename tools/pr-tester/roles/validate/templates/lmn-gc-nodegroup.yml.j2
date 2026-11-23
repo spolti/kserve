@@ -1,0 +1,34 @@
+{# Node group whose PV node affinity selects exactly lmn_group.hosts. #}
+apiVersion: serving.kserve.io/v1alpha1
+kind: LocalModelNodeGroup
+metadata:
+  name: {{ lmn_group.name }}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/check: localmodel-node-gc
+spec:
+  storageLimit: 1Gi
+  persistentVolumeSpec:
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: {{ lmn_gc_storage_class }}
+    capacity:
+      storage: 1Gi
+    local:
+      path: /models
+    persistentVolumeReclaimPolicy: Delete
+    nodeAffinity:
+      required:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+{% for host in lmn_group.hosts %}
+                  - {{ host }}
+{% endfor %}
+  persistentVolumeClaimSpec:
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: {{ lmn_gc_storage_class }}
+    resources:
+      requests:
+        storage: 1Gi

@@ -26,6 +26,9 @@
 - name: Deploy Transformer InferenceService
   hosts: localhost
   gather_facts: false
+  # Read by scripts/watch-workload.sh
+  environment:
+    LIVE_OUTPUT: "{{ '1' if live_output | default(true) | bool else '0' }}"
 
   vars:
     transformer_namespace: kserve-transformer-test
@@ -281,41 +284,22 @@
             transformer: "{{ _transformer_spec }}"
 
     # ── Wait for readiness ────────────────────────────────────────────
-    - name: Wait for predictor deployment rollout
-      ansible.builtin.command: >-
-        kubectl rollout status deployment
-        -l serving.kserve.io/inferenceservice={{ isvc_name }},component=predictor
-        -n {{ transformer_namespace }}
-        --timeout={{ deploy_timeout }}s
-      changed_when: false
-      register: _predictor_rollout
-      retries: 3
-      delay: 10
-      until: _predictor_rollout.rc == 0
-
-    - name: Wait for transformer deployment rollout
-      ansible.builtin.command: >-
-        kubectl rollout status deployment
-        -l serving.kserve.io/inferenceservice={{ isvc_name }},component=transformer
-        -n {{ transformer_namespace }}
-        --timeout={{ deploy_timeout }}s
-      changed_when: false
-      register: _transformer_rollout
-      retries: 3
-      delay: 10
-      until: _transformer_rollout.rc == 0
-
-    - name: Wait for InferenceService Ready condition
-      ansible.builtin.command: >-
-        kubectl wait inferenceservice/{{ isvc_name }}
-        --for=condition=Ready
-        -n {{ transformer_namespace }}
-        --timeout={{ deploy_timeout }}s
+    # Watches predictor and transformer pods (both carry the ISVC label) and
+    # streams conditions, container states, events and logs until Ready.
+    - name: Wait for InferenceService Ready (predictor + transformer)
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/scripts/watch-workload.sh"
+          - --kind
+          - inferenceservice
+          - --name
+          - "{{ isvc_name }}"
+          - --namespace
+          - "{{ transformer_namespace }}"
+          - --timeout
+          - "{{ (deploy_timeout | int * 3) | string }}"
       changed_when: false
       register: _isvc_ready
-      retries: 2
-      delay: 30
-      until: _isvc_ready.rc == 0
 
     # ── Show status ───────────────────────────────────────────────────
     - name: Get InferenceService status

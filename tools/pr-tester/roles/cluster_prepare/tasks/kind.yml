@@ -56,6 +56,7 @@
 
     - name: Create kind cluster
       ansible.builtin.command: >-
+        {{ role_path }}/../../scripts/live-run.sh --label "Creating kind cluster {{ kind_cluster_name }}" --
         kind create cluster
         --name {{ kind_cluster_name }}
         --config /tmp/kind-config-{{ kind_cluster_name }}.yaml

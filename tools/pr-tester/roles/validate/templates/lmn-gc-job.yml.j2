@@ -1,0 +1,29 @@
+{# Stand-in for a download Job: controller-owned by the LocalModelNode, like
+   the ones localmodelnode/controller.go creates, and bound to the fake
+   node, so its pod stays Pending exactly as in the reported issue. #}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ lmn_job }}
+  namespace: {{ test_namespace }}
+  labels:
+    app.kubernetes.io/managed-by: kserve-pr-tester
+    kserve-pr-tester/check: localmodel-node-gc
+  ownerReferences:
+    - apiVersion: serving.kserve.io/v1alpha1
+      kind: LocalModelNode
+      name: {{ lmn_gone }}
+      uid: {{ lmn_gone_uid }}
+      controller: true
+      blockOwnerDeletion: true
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      nodeName: {{ lmn_gone }}
+      restartPolicy: Never
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: download
+          image: registry.k8s.io/pause:3.9

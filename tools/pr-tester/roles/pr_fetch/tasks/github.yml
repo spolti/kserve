@@ -45,46 +45,76 @@
     state: directory
     mode: "0755"
 
-- name: Clone repository into sandbox
-  ansible.builtin.command:
-    cmd: >
-      git clone --depth=50
-      https://github.com/{{ pr_owner }}/{{ pr_repo }}.git
-      {{ sandbox_dir }}/{{ pr_repo }}
-  args:
-    creates: "{{ sandbox_dir }}/{{ pr_repo }}/.git"
-
-- name: Checkout PR branch
-  ansible.builtin.command:
-    cmd: gh pr checkout {{ pr_number }}
-  args:
-    chdir: "{{ sandbox_dir }}/{{ pr_repo }}"
-  environment:
-    GH_TOKEN: "{{ lookup('env', 'GH_TOKEN') | default(lookup('env', 'GITHUB_TOKEN'), true) }}"
-
 - name: Get PR base branch
   ansible.builtin.command:
-    cmd: gh pr view {{ pr_number }} --json baseRefName -q .baseRefName
-  args:
-    chdir: "{{ sandbox_dir }}/{{ pr_repo }}"
+    cmd: gh pr view {{ pr_number }} --repo {{ pr_owner }}/{{ pr_repo }} --json baseRefName -q .baseRefName
   register: _pr_base_branch
   changed_when: false
   environment:
     GH_TOKEN: "{{ lookup('env', 'GH_TOKEN') | default(lookup('env', 'GITHUB_TOKEN'), true) }}"
 
-- name: Set base branch fact
+- name: Set base branch and source directory facts
   ansible.builtin.set_fact:
     pr_base_branch: "{{ _pr_base_branch.stdout | trim }}"
-
-- name: Fetch base branch for diff comparison
-  ansible.builtin.command:
-    cmd: git fetch origin {{ pr_base_branch }}:refs/remotes/origin/{{ pr_base_branch }} --depth=50
-  args:
-    chdir: "{{ sandbox_dir }}/{{ pr_repo }}"
-
-- name: Set source directory fact
-  ansible.builtin.set_fact:
     source_dir: "{{ sandbox_dir }}/{{ pr_repo }}"
+
+# Only the current base branch and the PR head, each at depth 1. No history:
+# the changed files and the diff come from the GitHub API below.
+- name: Clone base branch into sandbox
+  ansible.builtin.command:
+    cmd: >-
+      {{ role_path }}/../../scripts/live-run.sh --label "Cloning {{ pr_owner }}/{{ pr_repo }} {{ pr_base_branch }} (depth 1)" --
+      git clone --progress --depth=1 --single-branch --branch {{ pr_base_branch }}
+      https://github.com/{{ pr_owner }}/{{ pr_repo }}.git
+      {{ source_dir }}
+  args:
+    creates: "{{ source_dir }}/.git"
+
+# refs/pull/N/head lives on the base repository, for fork PRs too.
+- name: Fetch and check out PR head
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/../../scripts/live-run.sh"
+      - --label
+      - "Fetching PR #{{ pr_number }} head (depth 1)"
+      - --
+      - bash
+      - -c
+      - |
+        set -e
+        git fetch --progress --depth=1 origin +refs/pull/{{ pr_number }}/head:refs/remotes/origin/pull/{{ pr_number }}
+        git checkout -B pr-{{ pr_number }} refs/remotes/origin/pull/{{ pr_number }}
+        git log -1 --format='HEAD %h %s'
+  args:
+    chdir: "{{ source_dir }}"
+  changed_when: true
+
+- name: Record PR head commit
+  ansible.builtin.command:
+    cmd: git rev-parse HEAD
+  args:
+    chdir: "{{ source_dir }}"
+  register: _pr_head
+  changed_when: false
+
+# pr_analyze and security_scan use these instead of a git diff, which would
+# need the merge base and therefore history.
+- name: Get PR changed files and diff from GitHub
+  ansible.builtin.shell: |
+    set -euo pipefail
+    gh pr diff {{ pr_number }} --repo {{ pr_owner }}/{{ pr_repo }} --name-only > {{ sandbox_dir }}/changed-files.txt
+    gh pr diff {{ pr_number }} --repo {{ pr_owner }}/{{ pr_repo }} > {{ sandbox_dir }}/change.diff
+  args:
+    executable: /bin/bash
+  changed_when: false
+  environment:
+    GH_TOKEN: "{{ lookup('env', 'GH_TOKEN') | default(lookup('env', 'GITHUB_TOKEN'), true) }}"
+
+- name: Set change facts
+  ansible.builtin.set_fact:
+    pr_head_sha: "{{ _pr_head.stdout | trim }}"
+    pr_changed_files: "{{ lookup('file', sandbox_dir ~ '/changed-files.txt').splitlines() | select | list }}"
+    pr_diff_file: "{{ sandbox_dir }}/change.diff"
 
 - name: Trigger Copilot review (optional)
   ansible.builtin.command:

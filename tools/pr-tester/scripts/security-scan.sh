@@ -7,12 +7,14 @@
 #   - Shell-injection backtick check skips Go struct tags
 #   - Crypto-address patterns use word boundaries
 #
-# Usage: security-scan.sh <repo_dir> <base_branch>
+# Usage: security-scan.sh <repo_dir> <base_branch | diff_file>
+#   base_branch: diff BASE...HEAD in repo_dir (needs the merge base locally)
+#   diff_file:   scan an existing unified diff (e.g. from the GitHub/GitLab API)
 # Exit 0 = clean, Exit 1 = findings detected
 
 set -euo pipefail
 
-REPO_DIR="${1:?Usage: security-scan.sh <repo_dir> <base_branch>}"
+REPO_DIR="${1:?Usage: security-scan.sh <repo_dir> <base_branch|diff_file>}"
 BASE_BRANCH="${2:-origin/master}"
 FINDINGS=()
 DIFF_FILE=$(mktemp)
@@ -20,7 +22,12 @@ DIFF_FILE=$(mktemp)
 trap 'rm -f "$DIFF_FILE"' EXIT
 
 cd "$REPO_DIR"
-git diff "$BASE_BRANCH"...HEAD > "$DIFF_FILE"
+if [ -f "$BASE_BRANCH" ]; then
+    cp "$BASE_BRANCH" "$DIFF_FILE"
+    BASE_BRANCH="the change's diff ($BASE_BRANCH)"
+else
+    git diff "$BASE_BRANCH"...HEAD > "$DIFF_FILE"
+fi
 
 if [ ! -s "$DIFF_FILE" ]; then
     echo "[SCAN] No diff found between HEAD and $BASE_BRANCH — nothing to scan."

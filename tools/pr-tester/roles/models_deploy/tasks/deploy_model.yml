@@ -15,17 +15,23 @@
   vars:
     model: "{{ _model }}"
 
+# Streams conditions, pod/container states, events and container logs while
+# waiting (scripts/watch-workload.sh). The timeout keeps the previous total
+# budget (3 attempts of isvc_ready_timeout).
 - name: "Wait for {{ _model.name }} to be ready"
-  ansible.builtin.command: >-
-    kubectl wait {{ _wait_resource }}/{{ _model.name }}
-    --for=condition=Ready
-    -n {{ test_namespace }}
-    --timeout={{ isvc_ready_timeout }}s
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/../../scripts/watch-workload.sh"
+      - --kind
+      - "{{ _wait_resource }}"
+      - --name
+      - "{{ _model.name }}"
+      - --namespace
+      - "{{ test_namespace }}"
+      - --timeout
+      - "{{ (isvc_ready_timeout | int * 3) | string }}"
   changed_when: false
   register: _isvc_wait
-  retries: 2
-  delay: 30
-  until: _isvc_wait.rc == 0
 
 # Multi-model InferenceServices: deploy their TrainedModels once the
 # predictor (and its agent puller) is up.

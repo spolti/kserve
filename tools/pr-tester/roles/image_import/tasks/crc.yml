@@ -17,9 +17,18 @@
   changed_when: true
 
 - name: Tag and push images to CRC registry
-  ansible.builtin.shell: |
-    {{ engine }} tag {{ item }} {{ openshift_registry }}/{{ kserve_namespace }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
-    {{ engine }} push --tls-verify=false {{ openshift_registry }}/{{ kserve_namespace }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/../../scripts/live-run.sh"
+      - --label
+      - "Pushing {{ item }} to the CRC registry"
+      - --
+      - bash
+      - -c
+      - |
+        set -e
+        {{ engine }} tag {{ item }} {{ openshift_registry }}/{{ kserve_namespace }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
+        {{ engine }} push --tls-verify=false {{ openshift_registry }}/{{ kserve_namespace }}/{{ item.split(':')[0] }}:{{ item.split(':')[1] }}
   loop: "{{ built_images }}"
   loop_control:
     label: "{{ item }}"

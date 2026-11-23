@@ -12,13 +12,22 @@
 - name: Analyze PR changes
   when: auto_detect_components | bool
   block:
+    # pr_fetch provides the changed files from the GitHub/GitLab API (the
+    # clone has no history); the git diff is a fallback for other callers.
     - name: Get list of changed files in PR
       ansible.builtin.command:
         cmd: git diff --name-only origin/{{ pr_base_branch }}...HEAD
       args:
         chdir: "{{ source_dir }}"
       changed_when: false
-      register: _changed_files
+      register: _changed_files_git
+      when: pr_changed_files is not defined
+
+    - name: Use changed files
+      ansible.builtin.set_fact:
+        _changed_files:
+          stdout: "{{ pr_changed_files | join(' ') if pr_changed_files is defined else _changed_files_git.stdout }}"
+          stdout_lines: "{{ pr_changed_files if pr_changed_files is defined else _changed_files_git.stdout_lines }}"
 
     - name: Display changed files count
       ansible.builtin.debug:

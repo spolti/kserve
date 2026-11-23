@@ -9,7 +9,7 @@
   block:
     - name: Locate security scan script
       ansible.builtin.set_fact:
-        _scan_script: "{{ playbook_dir }}/scripts/security-scan.sh"
+        _scan_script: "{{ role_path }}/../../scripts/security-scan.sh"
 
     - name: Ensure scan script is executable
       ansible.builtin.file:
@@ -18,7 +18,8 @@
 
     - name: Execute security scan on PR diff
       ansible.builtin.command:
-        cmd: "{{ _scan_script }} {{ source_dir }} origin/{{ pr_base_branch }}"
+        # The API diff from pr_fetch when available (the clone has no history).
+        cmd: "{{ _scan_script }} {{ source_dir }} {{ pr_diff_file | default('origin/' ~ pr_base_branch) }}"
       register: _scan_result
       failed_when: false
       changed_when: false

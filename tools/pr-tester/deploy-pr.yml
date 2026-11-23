@@ -18,11 +18,15 @@
 #   -e models_to_deploy='["sklearn-iris","xgboost-iris"]'
 #   -e deploy_canary_model=true          (add sklearn canary ISVC with canary revisions)
 #   -e run_ssrf_tests=true               (run HTTP(S) storageUri SSRF admission/runtime checks)
+#   -e run_localmodel_node_gc_tests=true (LocalModelNode GC on node deletion; needs the localmodel install)
 #   -e gitlab_validate_certs=false       (GitLab with an untrusted corporate CA; or set gitlab_ca_path)
 #
 - name: KServe PR Local Test
   hosts: localhost
   gather_facts: true
+  # Read by scripts/live-run.sh and scripts/watch-workload.sh
+  environment:
+    LIVE_OUTPUT: "{{ '1' if live_output | default(true) | bool else '0' }}"
 
   pre_tasks:
     - name: Validate required variables
