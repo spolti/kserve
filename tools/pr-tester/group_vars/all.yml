@@ -60,6 +60,14 @@ minikube_addons:
 # Auto-upgrade minikube to latest GitHub release
 minikube_auto_upgrade: true
 
+# Allow forwarded pod traffic on minikube nodes so pods can resolve names and
+# download models. Needed with the podman driver on minikube v1.39 (kicbase
+# v0.0.51), where the node's iptables FORWARD policy ends up as DROP.
+# Re-applied on every run; see roles/cluster_prepare/tasks/minikube_pod_egress.yml.
+minikube_pod_egress_fix: true
+minikube_pod_cidr: 10.244.0.0/16
+minikube_dns_check_host: storage.googleapis.com
+
 # Kubernetes version for minikube (empty = minikube default)
 minikube_kubernetes_version: ""
 

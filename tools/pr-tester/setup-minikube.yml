@@ -97,6 +97,10 @@
       environment: "{{ _minikube_env }}"
       when: _minikube_status.rc == 0 and '"Running"' in _minikube_status.stdout
 
+    # -- Pod egress (DNS, model downloads) --
+    - name: Ensure pods can reach the outside world
+      ansible.builtin.include_tasks: roles/cluster_prepare/tasks/minikube_pod_egress.yml
+
     # -- Wait for dashboard --
     - name: Wait for dashboard deployment
       ansible.builtin.command: >-

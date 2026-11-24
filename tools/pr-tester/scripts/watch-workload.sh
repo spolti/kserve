@@ -100,6 +100,46 @@ cond_tpl='{{range .status.conditions}}{{.type}}={{.status}}{{if .reason}}({{.rea
 owner_tpl='{{range .items}}{{range .metadata.ownerReferences}}{{.name}}{{"\n"}}{{end}}{{end}}'
 event_tpl='{{range .items}}{{.metadata.uid}}|{{.count}}|{{.lastTimestamp}}|{{.type}}|{{.reason}}|{{.involvedObject.kind}}/{{.involvedObject.name}}|{{.message}}{{"\n"}}{{end}}'
 
+# Seconds between "repeated xN" summaries of an already printed event.
+repeat_every=60
+
+# Failed container attempts and blocking waits, one tab-separated line each:
+# POD CONTAINER RESTARTS EXIT_CODE REASON WAITING_REASON DETAIL
+# DETAIL is the last line of the termination message (what the process
+# printed last, e.g. the storage-initializer error), shortened in the middle.
+failure_py='
+import json, re, sys
+BLOCKING = {"ImagePullBackOff", "ErrImagePull", "InvalidImageName",
+            "CreateContainerConfigError", "CreateContainerError", "RunContainerError"}
+def short(s, n=320):
+    s = " ".join(s.split())
+    # Drop a leading "2026-11-19 20:31:39.667 1 storage.initializer ERROR [...]" prefix.
+    s = re.sub(r"^\d{4}-\d\d-\d\d[ T][\d:.,]+\s+(\d+\s+)?(\S+\s+)?(ERROR|WARNING|CRITICAL|FATAL|INFO)\s+(\[[^\]]*\]\s+)?", "", s)
+    # Python/urllib3 chains put the real reason last: keep "<message> | cause: <innermost cause>".
+    if "Caused by " in s:
+        head, cause = s.split(", last exception:")[0].split(" (Caused by ")[0], s.rsplit("Caused by ", 1)[1]
+        cause = re.sub(r"\"\)+$", "", cause)
+        cause = re.sub(r"^\w+\(\"?\w+\(host=[^)]*\):\s*", "", cause)
+        cause += ")" * max(0, cause.count("(") - cause.count(")"))
+        s = head[:140] + " | cause: " + cause
+    return s if len(s) <= n else s[:110] + " ... " + s[-(n - 115):]
+for pod in json.load(sys.stdin).get("items", []):
+    st = pod.get("status") or {}
+    for c in (st.get("initContainerStatuses") or []) + (st.get("containerStatuses") or []):
+        state, last = c.get("state") or {}, c.get("lastState") or {}
+        waiting = (state.get("waiting") or {})
+        term = state.get("terminated") or last.get("terminated")
+        fields = None
+        if term and term.get("exitCode", 0) != 0:
+            lines = [l for l in (term.get("message") or "").splitlines() if l.strip()]
+            fields = [str(term.get("exitCode")), term.get("reason") or "Error",
+                      waiting.get("reason", ""), short(lines[-1]) if lines else ""]
+        elif waiting.get("reason") in BLOCKING:
+            fields = ["", waiting["reason"], "", short(waiting.get("message", ""))]
+        if fields:
+            print("\t".join([pod["metadata"]["name"], c["name"], str(c.get("restartCount", 0))] + fields))
+'
+
 say ""
 say "  ▶ Waiting for ${kind}/${name} in ${ns} (timeout ${timeout}s)"
 say "    pods: ${selector}"
@@ -143,13 +183,46 @@ while :; do
   owners=$(kubectl get pods -n "$ns" -l "$selector" -o go-template="$owner_tpl" 2>/dev/null)
   wanted=$( { echo "$name"; awk '{print $1}' <<< "$pods"; echo "$owners";
               sed -E 's/-[a-z0-9]{5,10}$//' <<< "$owners"; } | sort -u | tr '\n' ' ')
+  # Each distinct event (object + reason + message) prints once; repeats are
+  # only counted and summarized at most every repeat_every seconds, so a
+  # noisy source (e.g. an HPA without metrics-server) does not bury the rest.
+  now=$(date +%s)
   kubectl get events -n "$ns" -o go-template="$event_tpl" 2>/dev/null \
     | awk -F'|' -v w=" ${wanted}" '{ split($6, o, "/"); if (index(w, " " o[2] " ")) print }' \
     | while IFS='|' read -r uid count last type reason obj msg; do
         key="${uid}_${count}"
         [[ -e "$state/ev_${key}" ]] && continue
         : > "$state/ev_${key}"
-        say "  [$(ts)] event ${type} ${reason} ${obj}: ${msg}"
+        sig=$(printf '%s|%s|%s' "$obj" "$reason" "$msg" | cksum | awk '{print $1}')
+        if [[ -e "$state/sig_${sig}" ]]; then
+          read -r n since < "$state/sig_${sig}"
+          echo "$(( n + 1 )) ${since}" > "$state/sig_${sig}"
+        else
+          echo "0 ${now}" > "$state/sig_${sig}"
+          printf '%s %s %s' "$type" "$reason" "$obj" > "$state/sigdesc_${sig}"
+          mark="·"; [[ "$type" == "Warning" ]] && mark="⚠"
+          say "  [$(ts)] ${mark} event ${type} ${reason} ${obj}: ${msg}"
+        fi
+      done
+  for f in "$state"/sig_*; do
+    [[ -e "$f" ]] || continue
+    read -r n since < "$f"
+    if (( n > 0 && now - since >= repeat_every )); then
+      say "  [$(ts)]   ↻ $(cat "${f/sig_/sigdesc_}") repeated ${n}x in the last $(( now - since ))s"
+      echo "0 ${now}" > "$f"
+    fi
+  done
+
+  # --- container failures: one highlighted line per failed attempt, with the
+  #     exit code and the last line of the termination message ---
+  kubectl get pods -n "$ns" -l "$selector" -o json 2>/dev/null | python3 -I -c "$failure_py" 2>/dev/null \
+    | while IFS=$'\t' read -r pod container restarts code reason waiting detail; do
+        key="fail_${pod}_${container}_${restarts}_${code}"
+        [[ -e "$state/$key" ]] && continue
+        : > "$state/$key"
+        line="✘ ${pod}/${container} failed: ${reason}${code:+ (exit ${code})}, restarts ${restarts}${waiting:+, now ${waiting}}${detail:+ -> ${detail}}"
+        printf '%s\n' "$line" > "$state/lastfail_${pod}_${container}"
+        say "  [$(ts)] ${line}"
       done
 
   # --- follow logs of running/terminated containers, once per restart ---
@@ -176,6 +249,10 @@ while :; do
 
   if (( $(date +%s) >= deadline )); then
     say "  ✘ ${kind}/${name} not Ready after ${timeout}s"
+    if compgen -G "$state/lastfail_*" > /dev/null; then
+      say "  --- container failures (most recent per container) ---"
+      cat "$state"/lastfail_* | sed 's/^/    /' > "$out"
+    fi
     say "  --- conditions ---"
     kubectl get "$kind" "$name" -n "$ns" -o go-template="$cond_tpl" 2>&1 | sed 's/^/    /' > "$out"
     while read -r pod _; do

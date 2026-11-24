@@ -47,6 +47,10 @@
   environment: "{{ _minikube_env }}"
   when: _minikube_status.rc == 0 and '"Running"' in _minikube_status.stdout
 
+# Fresh and existing clusters alike: the rules are lost on node restarts.
+- name: Ensure pods can reach the outside world (DNS, model downloads)
+  ansible.builtin.include_tasks: minikube_pod_egress.yml
+
 - name: Get minikube IP
   ansible.builtin.command: "{{ _minikube_cmd }} ip"
   changed_when: false

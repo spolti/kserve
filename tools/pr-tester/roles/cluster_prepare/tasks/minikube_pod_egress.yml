@@ -1,0 +1,90 @@
+---
+# Pod egress on minikube (podman driver, minikube v1.39 / kicbase v0.0.51).
+#
+# dockerd starts at node boot, sets the iptables FORWARD policy to DROP, and is
+# then masked because the cluster runs on containerd. kindnet writes its allow
+# rules to nftables, so the legacy FORWARD DROP still applies and every packet
+# from a pod to the outside world is dropped. The first visible symptom is DNS:
+# CoreDNS cannot reach its upstream, and storage-initializer fails with
+# "Temporary failure in name resolution".
+#
+# This allows forwarded pod traffic on every minikube node, then checks DNS end
+# to end through CoreDNS. The rules do not survive a node restart, so they are
+# re-applied on every run. Disable with -e minikube_pod_egress_fix=false.
+#
+# Expects: _minikube_cmd, _minikube_env
+
+- name: Pod egress fix
+  when: minikube_pod_egress_fix | default(true) | bool
+  vars:
+    _live_run: "{{ (role_path ~ '/../..') if role_path is defined else playbook_dir }}/scripts/live-run.sh"
+    _pod_cidr: "{{ minikube_pod_cidr | default('10.244.0.0/16') }}"
+    _dns_check_host: "{{ minikube_dns_check_host | default('storage.googleapis.com') }}"
+  block:
+    - name: List minikube nodes
+      ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
+      register: _egress_nodes
+      changed_when: false
+
+    - name: Allow forwarded pod traffic on each node
+      ansible.builtin.command:
+        argv:
+          - "{{ _live_run }}"
+          - --label
+          - "Allowing pod egress ({{ _pod_cidr }}) through FORWARD on node {{ item }}"
+          - --
+          - "{{ _minikube_cmd }}"
+          - ssh
+          - -n
+          - "{{ item }}"
+          - --
+          - >-
+            set -e;
+            c='kserve-pr-tester: pod egress';
+            if sudo iptables -C FORWARD -s {{ _pod_cidr }} -m comment --comment "$c" -j ACCEPT 2>/dev/null;
+            then echo "outbound rule already present";
+            else sudo iptables -I FORWARD 1 -s {{ _pod_cidr }} -m comment --comment "$c" -j ACCEPT; echo "outbound rule added"; fi;
+            if sudo iptables -C FORWARD -d {{ _pod_cidr }} -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "$c" -j ACCEPT 2>/dev/null;
+            then echo "return rule already present";
+            else sudo iptables -I FORWARD 2 -d {{ _pod_cidr }} -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "$c" -j ACCEPT; echo "return rule added"; fi;
+            sudo iptables -S FORWARD | head -4
+      environment: "{{ _minikube_env }}"
+      loop: "{{ _egress_nodes.stdout.split() }}"
+      changed_when: true
+
+    - name: Get cluster DNS service IP
+      ansible.builtin.command: kubectl get svc -n kube-system kube-dns -o jsonpath='{.spec.clusterIP}'
+      register: _egress_dns_ip
+      changed_when: false
+
+    # Through CoreDNS, so the query leaves via the pod network like a pod's
+    # would. Retries cover CoreDNS's short negative cache.
+    - name: Check pods can resolve external names
+      ansible.builtin.command:
+        argv:
+          - "{{ _minikube_cmd }}"
+          - ssh
+          - --
+          - "nslookup -timeout=5 {{ _dns_check_host }} {{ _egress_dns_ip.stdout }}"
+      environment: "{{ _minikube_env }}"
+      register: _egress_dns
+      changed_when: false
+      failed_when: false
+      retries: 6
+      delay: 5
+      until: _egress_dns.rc == 0
+
+    - name: Report pod DNS
+      ansible.builtin.debug:
+        msg: "Pod DNS works: {{ _dns_check_host }} resolves through CoreDNS ({{ _egress_dns_ip.stdout }})"
+      when: _egress_dns.rc == 0
+
+    - name: Fail when pods still cannot resolve external names
+      ansible.builtin.fail:
+        msg: |
+          Pods cannot resolve {{ _dns_check_host }} through CoreDNS ({{ _egress_dns_ip.stdout }}),
+          even after allowing pod egress. Models downloaded by hostname would fail.
+          {{ (_egress_dns.stdout ~ ' ' ~ _egress_dns.stderr) | trim }}
+          Check: {{ _minikube_cmd }} ssh -- sudo iptables -L FORWARD -v -n
+          Skip this check with -e minikube_pod_egress_fix=false.
+      when: _egress_dns.rc != 0
